@@ -29,7 +29,6 @@ import type { UpdateIo } from './update'
 const open = atom({ plugin: 'office-space', key: 'open' } as const, false)
 const selected = atom({ plugin: 'office-space', key: 'selected' } as const, '') // the worker whose note is showing
 const PANE = 'office-space'
-const STORE_PANE = 'pane'
 const STORE_BAND = 'band'
 const STORE_UPDATE_CHECKED = 'updateChecked'
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -292,17 +291,27 @@ type Command = {
   run: (args: string) => Outcome
 }
 
+/** Whether the panel is on screen right now, by the engine's own record. */
+async function paneShowing($: EngineInterface): Promise<boolean> {
+  try {
+    return (await $.ui.panes()).some((p) => p.id === PANE && p.isPlaced)
+  } catch {
+    return paneOpen // the record is unavailable: trust what we last did
+  }
+}
+
 async function togglePanel($: EngineInterface): Promise<Reply> {
+  // Ask the engine, not a remembered flag: a flag carried over from an earlier
+  // chat made the first command in a new chat "close" a panel that was not there.
+  paneOpen = await paneShowing($)
   if (paneOpen) {
     await $.ui.close({ id: PANE })
     paneOpen = false
-    try { await $.store.set(STORE_PANE, false) } catch {}
     await setOpen($, bandOn)
     return { text: 'Office Space is closed for the day.' }
   }
   await setOpen($, true)
   await openPane($)
-  try { await $.store.set(STORE_PANE, true) } catch {}
   return { text: 'Office Space is open.' }
 }
 
@@ -476,17 +485,19 @@ export const register: Register = (on, options) => {
       })
     }
     try {
-      paneOpen = (await $.store.get(STORE_PANE)) === true
       bandOn = (await $.store.get(STORE_BAND)) === true
     } catch {}
+    // The panel is never assumed open from an earlier chat; only one the app
+    // already shows in this session (restored or kept across a reload) counts.
+    paneOpen = await paneShowing($)
     if (paneOpen || bandOn) await setOpen($, true)
     if (checkForUpdates) void dailyUpdateCheck($)
     if (alertOnBlocked && !alertTimer) {
       void watchAlerts($)
       alertTimer = $.clock.every(ALERT_EVERY_MS, () => { void watchAlerts($) })
     }
-    // Not reopened here: the app restores panels itself, and reopening from
-    // code would put the panel back in its default spot.
+    // Not reopened here: reopening from code would put the panel back in its
+    // default spot; /office-space opens it when asked.
     return next(e)
   })
 
@@ -497,7 +508,6 @@ export const register: Register = (on, options) => {
   // The person closing the panel with its close mark.
   on('ui.close', { id: PANE }, async ($, e, next) => {
     paneOpen = false
-    try { await $.store.set(STORE_PANE, false) } catch {}
     if (!bandOn) await setOpen($, false)
     return next(e)
   })

@@ -2,6 +2,9 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## Unreleased
+- Fix: the first `/office-space` in a new chat no longer says "closed for the day" instead of opening. The toggle remembered the panel as open from the previous chat; it now asks the app which panels are actually showing in this session (`$.ui.panes()`), so the command opens a panel that is not there and closes one that is, including after the panel's close mark. The panel is no longer saved across sessions (the band setting still is).
+
 ## 0.9.0 — 2026-10-09
 Per-project external workers, plus a remote annex, alerts and notes.
 - New optional worker field `scope` (a folder path or an array of them, `~` allowed). A scoped worker shows only in sessions whose working folder is that folder or inside it; unscoped workers show everywhere as before. Paths are compared as real paths on a folder boundary. A malformed `scope` skips the worker, and if the session's working folder is unavailable, scoped workers are hidden. The answer is cached between folder refreshes so it stays cheap.

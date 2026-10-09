@@ -1,23 +1,34 @@
 # Office Space
 
-A Claude Code mod that draws your session as a tiny 16-bit office. The main chat is **The Boss**. Each subagent walks in, picks up its assignment, sits at a desk and works. When it finishes, it walks back to hand in the result and leaves.
+![Office Space: subagents and outside jobs drawn as 16-bit office workers at their desks](docs/screenshot.png)
 
-```
-/office-space        open or close the Office Space panel
-/office-space band   show or hide the small version above the prompt
-```
+A Claude Code mod that draws your session as a tiny 16-bit office. The main chat is **The Boss**. Each subagent walks in, picks up its assignment, sits at a desk and works. When it finishes, it walks back to hand in the result and leaves. Jobs running outside the session (a cron job, another machine) can sit at a desk too: see [External workers](#external-workers).
 
-It only draws UI: no skills, agents or prompt text, so it adds nothing to Claude's context.
+## Quick start
 
-## Install
+1. **Install.** In Claude Code:
+   ```
+   /plugin install office-space --marketplace rbrtcnkln1/office-space
+   ```
+2. **Open the office.** Type `/office-space`. Run it again to close the panel. `/office-space band` shows or hides a small version above the prompt.
+3. **See it with some staff.** With the office open, clone this repo and run the 60-second demo in a terminal:
+   ```bash
+   git clone https://github.com/rbrtcnkln1/office-space
+   bash office-space/examples/demo.sh
+   ```
+   Four fake workers start, get blocked or need approval, then finish or fail, and the demo cleans up after itself. Or just ask Claude to run a few subagents.
 
-In Claude Code:
+## Requirements
 
-```
-/plugin install office-space --marketplace rbrtcnkln1/office-space
-```
+A Claude Code version that supports plugin hook modules (2.1.29x or newer); older versions reject the plugin. It works in the terminal and in the desktop app's Code tab.
 
-Then type `/office-space`. To update, run `/plugin` → Marketplaces → office-space → Update (or `claude plugin update office-space` in a terminal); new versions arrive whenever the version in `plugin.json` is bumped here.
+## FAQ
+
+**Does it use my context or tokens?** No. It only draws UI: no skills, agents or prompt text, so it adds nothing to Claude's context.
+
+**How do I update?** Run `/plugin` → Marketplaces → office-space → Update, or `claude plugin update office-space` in a terminal. New versions arrive whenever the version in `plugin.json` is bumped here.
+
+**How do I uninstall?** `/plugin uninstall office-space`.
 
 ## External workers
 
@@ -65,18 +76,14 @@ The folder is checked every 5 seconds. Only files that changed since the last ch
 
 ### Example writer
 
-To avoid half-written reads, write each file to a hidden temp name, then rename it:
+[`examples/office-worker.sh`](examples/office-worker.sh) writes one worker file. It writes to a hidden temp name and renames it, so the mod never reads a half-written file, and it escapes text with `jq` when available (with a plain fallback):
 
 ```bash
-#!/usr/bin/env bash
-# usage: office-worker.sh <id> <working|waiting|blocked|done|failed> "<task>" ["<note>"]
-dir="${OFFICE_SPACE_WORKERS_DIR:-$HOME/.claude/office-space/workers}"; mkdir -p "$dir"
-printf '{"id":"%s","status":"%s","task":"%s","note":"%s","source":"%s","updated":"%s"}\n' \
-  "$1" "$2" "$3" "${4:-}" "$(hostname -s)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$dir/.$1.tmp"
-mv "$dir/.$1.tmp" "$dir/$1.json"
+bash examples/office-worker.sh nightly-backup blocked "Copying photos" "Disk is full, free some space"
+bash examples/office-worker.sh nightly-backup done "Copying photos"
 ```
 
-This script doesn't escape its arguments, so a task containing `"` writes an invalid file, which the mod skips. For arbitrary text, build the JSON with `jq -n --arg ...` instead. To report from another machine, sync or mount its status folder into the workers folder (for example with `rsync` or a shared drive).
+To report from another machine, sync or mount its status folder into the workers folder (for example with `rsync` or a shared drive). [`examples/demo.sh`](examples/demo.sh) stages four workers for about a minute.
 
 ## Development
 

@@ -114,7 +114,8 @@ function hash(s: string): number {
   return h
 }
 const short = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
-const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
+// control characters are invalid in XML and would break the whole drawing
+const esc = (s: string) => s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
 
 /** Grid → one <path> per colour, each pixel run a tiny rect. Cached per key. */
 const pathCache = new Map<string, string>()
@@ -140,6 +141,18 @@ function gridSvg(key: string, g: Grid, pal: Palette): string {
   if (pathCache.size > 600) pathCache.clear()
   pathCache.set(key, out)
   return out
+}
+/** The floor-tile seams, rebuilt only when the floor changes size. */
+let seamsKey = ''
+let seamsSvg = ''
+function floorSeams(W: number, H: number): string {
+  if (seamsKey === `${W}x${H}`) return seamsSvg
+  const d: string[] = []
+  for (let x = 16; x < W; x += 16) d.push(`M${x} 0h1v${H}h-1z`)
+  for (let y = 16; y < H; y += 16) d.push(`M0 ${y}h${W}v1h-${W}z`)
+  seamsKey = `${W}x${H}`
+  seamsSvg = `<path fill="#97a9c1" d="${d.join('')}"/>`
+  return seamsSvg
 }
 const place = (x: number, y: number, inner: string) => `<g transform="translate(${Math.round(x)} ${Math.round(y)})">${inner}</g>`
 
@@ -686,10 +699,7 @@ export class Office {
     const H = Math.max(this.height, Math.round(W * minAspect))
     const out: string[] = []
     out.push(`<rect width="${W}" height="${H}" fill="${FLOOR}"/>`)
-    const seams: string[] = []
-    for (let x = 16; x < W; x += 16) seams.push(`M${x} 0h1v${H}h-1z`)
-    for (let y = 16; y < H; y += 16) seams.push(`M0 ${y}h${W}v1h-${W}z`)
-    out.push(`<path fill="#97a9c1" d="${seams.join('')}"/>`)
+    out.push(floorSeams(W, H))
     out.push(this.backWall())
     // title
     out.push(`<text x="4" y="8" font-family="ui-monospace,Menlo,monospace" font-size="6" font-weight="700" fill="#c0392b">◆ OFFICE SPACE</text>`)

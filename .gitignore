@@ -1,5 +1,5 @@
 # written by Claude Code when it loads the mod
-.claude-plugin/types/
+plugin/.claude-plugin/types/
 node_modules/
 .DS_Store
 # agent worktrees and local Claude Code state

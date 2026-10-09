@@ -1,43 +1,5 @@
 {
   "name": "office-space",
   "version": "0.8.1",
-  "description": "Subagents as 16-bit office workers above the prompt, plus external workers from a watched folder. Toggle with /office-space.",
-  "author": {
-    "name": "Robert Conklin",
-    "url": "https://github.com/rbrtcnkln1"
-  },
-  "homepage": "https://github.com/rbrtcnkln1/office-space",
-  "repository": "https://github.com/rbrtcnkln1/office-space",
-  "license": "MIT",
-  "keywords": [
-    "subagents",
-    "pixel-art",
-    "ui",
-    "pane",
-    "fun"
-  ],
-  "types": "./types/index.d.ts",
-  "userConfig": {
-    "workersDir": {
-      "type": "string",
-      "title": "External workers folder",
-      "description": "Folder of worker JSON files to show in the office (OFFICE_SPACE_WORKERS_DIR overrides it).",
-      "default": "~/.claude/office-space/workers",
-      "required": false
-    },
-    "staleMinutes": {
-      "type": "number",
-      "title": "Stale after (minutes)",
-      "description": "An external worker not updated for this long is drawn faded; after 4x this long it leaves.",
-      "default": 15,
-      "required": false
-    },
-    "checkForUpdates": {
-      "type": "boolean",
-      "title": "Check for updates daily",
-      "description": "Once a day at session start, ask GitHub for the newest version and show one toast if there is one. Off by default; Office Space makes no network requests unless this is on or you run /office-space-update.",
-      "default": false,
-      "required": false
-    }
-  }
+  "description": "Version pointer kept for copies older than 0.8.2. The mod itself lives in plugin/."
 }

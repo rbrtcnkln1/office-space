@@ -1,6 +1,6 @@
 # Media generator
 
-Builds the README GIFs and the teaser rough cut from the **real renderer**. Nothing is screen-recorded: the scenes drive the `Office` class from `hooks/office.ts` tick by tick, dump one SVG per frame, rasterize and assemble.
+Builds the README GIFs and the teaser rough cut from the **real renderer**. Nothing is screen-recorded: the scenes drive the `Office` class from `plugin/hooks/office.ts` tick by tick, dump one SVG per frame, rasterize and assemble.
 
 ```bash
 bash scripts/media/build.sh          # GIFs -> docs/media/, teaser -> docs/promo/office-space-teaser.mp4

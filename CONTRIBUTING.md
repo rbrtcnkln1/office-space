@@ -13,7 +13,8 @@ Issues and pull requests are welcome.
 3. Before a PR:
    ```bash
    claude plugin validate .
-   claude plugin test .
+   claude plugin validate plugin
+   bash scripts/test.sh
    ```
 
 ## Ground rules
@@ -21,6 +22,6 @@ Issues and pull requests are welcome.
 - **UI only, zero context cost.** The mod draws; it never adds skills, agents, MCP tools or system-prompt text. Anything that would put tokens in the model's context needs an issue and a discussion first.
 - **Generic.** No references to any company, product, machine, account or private workflow.
 - **Never crash the session.** Every file, store or agent read tolerates missing and malformed data.
-- **Tests with behaviour.** New behaviour gets a test in `tests/`.
-- **Releases** bump `version` in `.claude-plugin/plugin.json` and add a `CHANGELOG.md` entry.
+- **Tests with behaviour.** New behaviour gets a test in `tests/` (run with `bash scripts/test.sh`; see CLAUDE.md for why tests sit outside `plugin/`).
+- **Releases** bump the version in `plugin/.claude-plugin/plugin.json` AND the root stub `.claude-plugin/plugin.json`, and add a `CHANGELOG.md` entry.
 - **Issues** use the forms in `.github/ISSUE_TEMPLATE/` (bug report and idea); `/office-space-feedback` points people to them.

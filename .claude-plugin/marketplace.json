@@ -5,7 +5,7 @@
   "plugins": [
     {
       "name": "office-space",
-      "source": "./",
+      "source": "./plugin",
       "description": "Subagents (and work running elsewhere) as 16-bit office workers. Toggle with /office-space."
     }
   ]

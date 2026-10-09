@@ -8,8 +8,8 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Office } from '../../hooks/office'
-import type { AgentLike } from '../../hooks/office'
+import { Office } from '../../plugin/hooks/office'
+import type { AgentLike } from '../../plugin/hooks/office'
 
 const OUT = process.argv[2] ?? join(import.meta.dir, '.work', 'frames')
 const ONLY = process.argv.slice(3)

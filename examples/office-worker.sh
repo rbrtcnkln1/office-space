@@ -52,7 +52,7 @@ else
     sed -e "s|}\$|,\"scope\":\"$(esc "$scope" | sed -e 's/[\\|&]/\\&/g')\"}|" "$tmp" > "$tmp.s" && mv -f "$tmp.s" "$tmp"
   fi
   if [ -n "$url" ]; then
-    sed -e "s|}\$|,\"url\":\"$(esc "$url" | sed -e 's/[|&]/\\&/g')\"}|" "$tmp" > "$tmp.s" && mv -f "$tmp.s" "$tmp"
+    sed -e "s|}\$|,\"url\":\"$(esc "$url" | sed -e 's/[\\|&]/\\&/g')\"}|" "$tmp" > "$tmp.s" && mv -f "$tmp.s" "$tmp"
   fi
 fi
 mv -f "$tmp" "$dir/$id.json"

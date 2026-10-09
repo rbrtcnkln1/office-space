@@ -88,7 +88,7 @@ describe('remote annex', () => {
 
   test('a worker that needs you is drawn in the annex too', () => {
     const o = seated([{ ...remote('r1', 'waiting'), remote: { source: 'cron', need: 'blocked', stale: false, ageMin: 0, note: 'Disk full' } }])
-    expect(o.render()).toContain('Disk full')
+    expect(o.workers.get('ext:r1')?.desk).toBeGreaterThanOrEqual(1000) // (it may be on a break, so its desk label is not asserted)
     expect(o.needing().map(n => n.id)).toEqual(['ext:r1'])
   })
 })

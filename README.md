@@ -14,7 +14,7 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 
    **Or let Claude install it for you.** Paste this into Claude Code:
    > Install the Office Space mod for Claude Code: check that `claude --version` is 2.1.29x or newer (if older, tell me to update Claude Code instead). Then run `claude plugin marketplace add rbrtcnkln1/office-space` and `claude plugin install office-space@office-space`. When it's done, tell me to run `/reload-plugins` and then `/office-space`.
-2. **Open the office.** Type `/office-space`. Run it again to close the panel. `/office-space band` shows or hides a small version above the prompt.
+2. **Open the office.** Type `/office-space`. Run it again to close the panel. `/office-space-band` shows or hides a small version above the prompt. `/office-space-help` lists every command.
 3. **See it with some staff.** With the office open, clone this repo and run the 60-second demo in a terminal:
    ```bash
    git clone https://github.com/rbrtcnkln1/office-space
@@ -27,7 +27,10 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 | Command | What it does |
 | --- | --- |
 | `/office-space` | Open or close the Office Space panel |
-| `/office-space band` | Show or hide the small office strip above the prompt |
+| `/office-space-band` | Show or hide the small office strip above the prompt |
+| `/office-space-help` | List every Office Space command and setting |
+
+Type `/office-space` in the prompt and the menu lists all of them. The older `/office-space band` still works.
 
 ### Settings
 

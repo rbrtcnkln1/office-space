@@ -4,7 +4,9 @@
 // messages a subagent.
 //
 //   /office-space        open or close the Office Space panel
-//   /office-space band   show or hide the small version above the prompt
+//   /office-space-band   show or hide the small version above the prompt
+//   /office-space-help   list every command and setting
+// Each command is one row of COMMANDS below.
 //
 // Work running outside the session appears too: any script can drop one JSON
 // file per worker into the workers directory (see ./external.ts and README).
@@ -212,6 +214,84 @@ async function setOpen($: EngineInterface, on: boolean) {
   }
 }
 
+type Reply = { text: string }
+// A row decides what to do; the dispatcher below does it. Rows stay pure because
+// a module may not hand `$` to a function it looks up at run time.
+type Outcome = Reply | { toggle: 'panel' | 'band' }
+type Command = {
+  name: string
+  description: string
+  argumentHint?: string
+  run: (args: string) => Outcome
+}
+
+async function togglePanel($: EngineInterface): Promise<Reply> {
+  if (paneOpen) {
+    await $.ui.close({ id: PANE })
+    paneOpen = false
+    try { await $.store.set(STORE_PANE, false) } catch {}
+    await setOpen($, bandOn)
+    return { text: 'Office Space is closed for the day.' }
+  }
+  await setOpen($, true)
+  await openPane($)
+  try { await $.store.set(STORE_PANE, true) } catch {}
+  return { text: 'Office Space is open.' }
+}
+
+async function toggleBand($: EngineInterface): Promise<Reply> {
+  bandOn = !bandOn
+  try { await $.store.set(STORE_BAND, bandOn) } catch {}
+  await setOpen($, bandOn || paneOpen)
+  $.ui.invalidate('ui.render')
+  return { text: bandOn ? 'Office Space band is on.' : 'Office Space band is off.' }
+}
+
+// Every slash command is one row here. Add a row and it is registered,
+// answered and listed by /office-space-help (and should get a README row too).
+// Names allow only letters, digits, "_" and "-", so the family is spelled
+// office-space-<name>; they sort together in the "/" menu.
+export const COMMANDS: Command[] = [
+  {
+    name: 'office-space',
+    description: 'Open or close the Office Space panel (16-bit office of running agents)',
+    run: (args) => {
+      const arg = args.trim().toLowerCase()
+      if (arg === '') return { toggle: 'panel' }
+      if (arg === 'band') return { toggle: 'band' } // older spelling, kept working
+      return { text: `Unknown option "${args.trim().slice(0, 40)}". Type /office-space-help to see every Office Space command.` }
+    },
+  },
+  {
+    name: 'office-space-band',
+    description: 'Show or hide the small office strip above the prompt',
+    run: () => ({ toggle: 'band' }),
+  },
+  {
+    name: 'office-space-help',
+    description: 'List every Office Space command and setting',
+    run: () => ({ text: helpText() }),
+  },
+]
+
+async function runCommand($: EngineInterface, name: string, args: string): Promise<Reply> {
+  const c = COMMANDS.find((x) => x.name === name)
+  const out = c ? c.run(args) : { text: 'Unknown command. Type /office-space-help.' }
+  if ('toggle' in out) return out.toggle === 'panel' ? togglePanel($) : toggleBand($)
+  return out
+}
+
+export function helpText(): string {
+  const lines = COMMANDS.map((c) => `  /${c.name}${c.argumentHint ? ' ' + c.argumentHint : ''} - ${c.description}`)
+  return [
+    'Office Space commands:',
+    ...lines,
+    '',
+    'Settings (/plugin -> office-space -> configure): workersDir, staleMinutes.',
+    'Docs: https://github.com/rbrtcnkln1/office-space#readme',
+  ].join('\n')
+}
+
 export const register: Register = (on, options) => {
   const opts = (options ?? {}) as { workersDir?: unknown; staleMinutes?: unknown }
   if (typeof opts.workersDir === 'string' && opts.workersDir.trim()) workersDir = opts.workersDir
@@ -219,12 +299,14 @@ export const register: Register = (on, options) => {
   if (Number.isFinite(sm) && sm > 0) staleMinutes = sm
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'office-space',
-      description: 'Open the 16-bit office of running agents (add "band" for the strip above the prompt)',
-      argumentHint: '[band]',
-      immediate: true,
-    })
+    for (const c of COMMANDS) {
+      await $.command.register({
+        name: c.name,
+        description: c.description,
+        ...(c.argumentHint ? { argumentHint: c.argumentHint } : {}),
+        immediate: true,
+      })
+    }
     try {
       paneOpen = (await $.store.get(STORE_PANE)) === true
       bandOn = (await $.store.get(STORE_BAND)) === true
@@ -235,27 +317,9 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('command.run', { command: 'office-space' }, async ($, e) => {
-    const arg = String(e.args ?? '').trim().toLowerCase()
-    if (arg === 'band') {
-      bandOn = !bandOn
-      try { await $.store.set(STORE_BAND, bandOn) } catch {}
-      await setOpen($, bandOn || paneOpen)
-      $.ui.invalidate('ui.render')
-      return { text: bandOn ? 'Office Space band is on.' : 'Office Space band is off.' }
-    }
-    if (paneOpen) {
-      await $.ui.close({ id: PANE })
-      paneOpen = false
-      try { await $.store.set(STORE_PANE, false) } catch {}
-      await setOpen($, bandOn)
-      return { text: 'Office Space is closed for the day.' }
-    }
-    await setOpen($, true)
-    await openPane($)
-    try { await $.store.set(STORE_PANE, true) } catch {}
-    return { text: 'Office Space is open.' }
-  })
+  for (const c of COMMANDS) {
+    on('command.run', { command: c.name }, async ($, e) => runCommand($, c.name, String(e.args ?? '')))
+  }
 
   // The person closing the panel with its close mark.
   on('ui.close', { id: PANE }, async ($, e, next) => {

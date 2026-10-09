@@ -1,0 +1,7 @@
+{
+  "name": "office-space",
+  "version": "0.6.0",
+  "description": "Subagents as 16-bit office workers above the prompt. Toggle with /office-space.",
+  "author": { "name": "Robert Conklin" },
+  "types": "./types/index.d.ts"
+}

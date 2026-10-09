@@ -2,6 +2,15 @@
 
 Every release bumps `version` in `.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## 0.7.2 — 2026-10-08
+Security hardening.
+- Text from worker files and subagent descriptions is cleaned before drawing: control characters, invisible and right-to-left override characters, and invalid characters become spaces, so they can no longer stop the office from drawing or disguise a label.
+- Symlinked worker files and files that grow past the size limit are ignored.
+- A worker whose `updated` time is in the future now falls back to the file's modified time, so it leaves on schedule instead of staying forever.
+- `examples/office-worker.sh` validates the id and status, writes through a private temp file, refuses to overwrite a symlink, and strips control characters when `jq` is missing.
+- `examples/demo.sh` removes only its own four files.
+- Stored Employee of the Day counts are validated when loaded.
+
 ## 0.7.1 — 2026-10-08
 - README: screenshot, quick start, requirements, FAQ, and a copy-paste prompt to let Claude install the mod.
 - `examples/office-worker.sh` (worker writer) and `examples/demo.sh` (60-second demo).

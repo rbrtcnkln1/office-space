@@ -1,0 +1,42 @@
+name: Something is not working
+description: Tell us what went wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping! Plain words are perfect. Running `/office-space-feedback` shows the version details below.
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we see it happen?
+      description: The steps you took, as best you remember.
+  - type: input
+    id: office-version
+    attributes:
+      label: Office Space version
+      description: Shown by /office-space-help or /office-space-update
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: Run `claude --version` in a terminal
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where do you use Claude Code?
+      options: [Terminal, Desktop app, Not sure]
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot (optional)
+      description: Drag an image into this box.

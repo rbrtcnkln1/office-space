@@ -1,0 +1,22 @@
+name: I have an idea
+description: Suggest something new or better
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for sharing! Rough ideas are welcome.
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to see?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What would it make better?
+  - type: textarea
+    id: sketch
+    attributes:
+      label: Sketch or screenshot (optional)
+      description: Drag an image into this box.

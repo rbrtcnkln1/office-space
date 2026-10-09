@@ -4,3 +4,7 @@ node_modules/
 .DS_Store
 # agent worktrees and local Claude Code state
 .claude/
+
+# generated media frames (scripts/media)
+scripts/media/.work/
+docs/promo/*.mp4

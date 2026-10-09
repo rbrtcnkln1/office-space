@@ -1,6 +1,6 @@
 # Office Space
 
-![Office Space: subagents and outside jobs drawn as 16-bit office workers at their desks](docs/screenshot.png)
+![Three subagents walk into the office, get briefed by the Boss, sit at their desks and start typing](docs/media/hire-day.gif)
 
 A Claude Code mod that draws your session as a tiny 16-bit office. The main chat is **The Boss**. Each subagent walks in, picks up its assignment, sits at a desk and works. When it finishes, it walks back to hand in the result and leaves. Jobs running outside the session (a cron job, another machine) can sit at a desk too: see [External workers](#external-workers).
 
@@ -90,6 +90,22 @@ A Claude Code version that supports plugin hook modules (2.1.29x or newer); olde
 **How do I update?** Type `/office-space-update`, or see [Updating](#updating) for the manual and automatic options.
 
 **How do I uninstall?** `/plugin uninstall office-space`.
+
+## See it in action
+
+Each clip is a short loop drawn by the real renderer (sped up a few times so you don't wait). Regenerate them with [`scripts/media`](scripts/media/README.md).
+
+**Hand-in.** A finished worker walks back to the Boss with the result, and a failed job goes in red. The Employee of the Day sign updates.
+
+![Workers hand their results to the Boss, one failed job in red, then everyone leaves](docs/media/hand-in.gif)
+
+**Remote crew.** Jobs outside Claude Code sit at desks with a teal badge. Blocked shows a red **!**, waiting a white **?**, and a quiet one fades.
+
+![External workers: one blocked with a red exclamation mark, one waiting with a question mark, one fading as stale](docs/media/remote-crew.gif)
+
+**Break room.** Workers wander off for coffee or push-ups. The Boss kicks back and whistles when there's nothing to do.
+
+![A worker gets coffee, another does push-ups, and the Boss kicks back and whistles](docs/media/break-room.gif)
 
 ## External workers
 

@@ -7,9 +7,10 @@
 //   Boss, hands in the result -> walks out the door; the desk empties again.
 
 import {
-  BUBBLE_DOTS, CHECK, PACKET_ERR, PACKET_OK, ROLES, character, feetUp, grid, icon, outline, paletteFor, pushup, roleFor,
+  BUBBLE_ASK, BUBBLE_DOTS, BUBBLE_STOP, CHECK, PACKET_ERR, PACKET_OK, ROLES, character, feetUp, grid, icon, outline, paletteFor, pushup, roleFor,
 } from './sprites'
 import type { Dir, Grid, Palette, RoleId } from './sprites'
+import type { RemoteInfo } from './external'
 
 // ---------- Tunables ----------
 
@@ -38,7 +39,7 @@ export const FLOOR = '#8ea1ba'
 // ---------- Types ----------
 
 export type AgentStatus = 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed'
-export type AgentLike = { id: string; name?: string; description: string; type: string; status: AgentStatus }
+export type AgentLike = { id: string; name?: string; description: string; type: string; status: AgentStatus; remote?: RemoteInfo }
 
 type Pt = { x: number; y: number } // sprite top-left, logical px
 type WorkerState =
@@ -95,6 +96,7 @@ type Worker = Actor & {
   activity: Activity | null
   item: Item | null // a drink or snack in hand
   sipUntil: number
+  remote?: RemoteInfo // an external worker (see ./external.ts)
 }
 
 type Boss = Actor & {
@@ -297,6 +299,7 @@ export class Office {
           id: a.id, name: a.name, label, role: roleFor(`${label} ${a.type}`, seed), status: a.status, state: 'idle', desk: -1, seed,
           pos: this.door(), facing: 'right', seated: false, plan: [], walkFrame: 0, reaching: false, carrying: false,
           ambientUntil: 0, seatedOnce: false, ending: false, hidden: false, activity: null, item: null, sipUntil: 0,
+          ...(a.remote ? { remote: a.remote } : {}),
         }
         this.workers.set(a.id, w)
         if (!this.claimDesk(w)) { this.workers.delete(a.id); continue }
@@ -307,10 +310,15 @@ export class Office {
       w.status = a.status
       w.name = a.name
       w.label = label
+      if (a.remote) w.remote = a.remote
       if (ACTIVE.has(before) && !ACTIVE.has(a.status)) this.finish(w)
       if (w.seated && !w.plan.length) w.state = this.seatedState(w)
     }
-    for (const id of [...this.workers.keys()]) if (!seen.has(id)) this.dismiss(id)
+    for (const [id, w] of [...this.workers.entries()]) {
+      if (seen.has(id)) continue
+      if (!w.remote) this.dismiss(id)
+      else if (!w.ending) { w.status = 'killed'; this.finish(w) } // file gone or long stale: walk out quietly
+    }
     this.layout()
     this.initialized = true
   }
@@ -374,6 +382,16 @@ export class Office {
     w.hidden = true
     // one at a time through the door
     const ahead = [...this.workers.values()].filter(o => o !== w && o.state === 'arriving' && o.hidden).length
+    if (w.remote) {
+      // already has its assignment from elsewhere: straight to a desk, no briefing
+      w.plan = [
+        { k: 'pause', ticks: 4 + ahead * 12 },
+        { k: 'do', fn: () => { w.hidden = false; w.facing = 'down'; w.state = 'to-desk' } },
+        { k: 'walk', path: [{ x: this.door().x, y: this.aisleY() }, ...this.toDesk(this.door().x, w.desk)], speed: SPEED },
+        { k: 'do', fn: () => this.sitDown(w) },
+      ]
+      return
+    }
     this.queue.push(w.id)
     w.plan = [
       { k: 'pause', ticks: 4 + ahead * 12 }, // the door swings open
@@ -732,24 +750,37 @@ export class Office {
       add(c.y + 9, place(c.x + 19, c.y + 9, STATIC.chair))
       add(c.y + 28, place(c.x + 4, c.y + 15, STATIC.desk))
       add(c.y + 28.1, place(c.x + 21, c.y + 15, STATIC.keyboard))
-      const screen = !here ? 'off' : here.status === 'running' ? 'on' : here.state === 'finishing' ? 'done' : 'off'
+      const screen = !here || here.remote?.stale ? 'off' : here.status === 'running' ? 'on' : here.state === 'finishing' ? 'done' : 'off'
       const mf = Math.floor(f / 2) % 4
       add(c.y + 28.1, place(c.x + 38, c.y + 3, gridSvg(`mon-${screen}-${here?.role === 'coder'}-${screen === 'on' ? mf : 0}`, monitorGrid(screen, mf, here?.role === 'coder'), FURN_PAL)))
       if (!here) continue
       const role = ROLES[here.role]
-      add(c.y + 28.2, place(c.x + 4, c.y + 6, gridSvg(`prop-${role.prop}`, icon(role.prop), paletteFor(here.role))))
+      const rm = here.remote
+      const fade = (svg: string) => (rm?.stale ? `<g opacity="0.4">${svg}</g>` : svg)
+      add(c.y + 28.2, fade(place(c.x + 4, c.y + 6, gridSvg(`prop-${role.prop}`, icon(role.prop), paletteFor(here.role)))))
+      if (rm) {
+        // the remote badge on the desk front
+        const tag = esc(short(rm.source.toUpperCase(), 10))
+        const tw = Math.round(tag.length * 2.4 + 4)
+        add(c.y + 28.3, `<rect x="${c.x + 6}" y="${c.y + 21}" width="${tw}" height="5" fill="${rm.stale ? '#7d8796' : '#1f8a7a'}"/><text x="${c.x + 8}" y="${c.y + 25}" font-family="ui-monospace,Menlo,monospace" font-size="3.6" font-weight="700" fill="#ffffff">${tag}</text>`)
+      }
       // label: status dot + role centred under the desk, the task right below
       const mid = c.x + 32
       const titleW = role.title.length * 3
       out.push(`<rect x="${Math.round(mid - titleW / 2 - 5)}" y="${c.y + 31}" width="3" height="3" fill="${this.dot(here)}"/>`)
       out.push(`<text x="${mid}" y="${c.y + 35}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" font-weight="700" fill="#22304a">${esc(role.title)}</text>`)
-      out.push(`<text x="${mid}" y="${c.y + 41}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="4" fill="#33445f">${esc(short(here.label, 30))}</text>`)
+      const sub = rm?.stale ? `stale ${rm.ageMin}m · ${here.label}` : rm?.need && rm.note ? rm.note : here.label
+      out.push(`<text x="${mid}" y="${c.y + 41}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="4" fill="${rm?.need && !rm.stale ? '#8e2a20' : '#33445f'}">${esc(short(sub, 30))}</text>`)
       const seat = this.seatOf(slot)
       const typing = here.status === 'running'
       const frame = typing ? Math.floor((f + here.seed) / 2) % 4 : Math.floor((f + here.seed) / 6) % 2
-      add(c.y + 16, this.charSvg(here.role, 'down', 'seat', frame, typing, (f + here.seed) % 53 < 2, !typing && frame === 1, seat))
+      add(c.y + 16, fade(this.charSvg(here.role, 'down', 'seat', frame, typing && !rm?.stale, (f + here.seed) % 53 < 2, !typing && frame === 1, seat)))
       if (here.item) add(c.y + 17, this.itemSvg(here.item, seat, true, f + here.seed))
-      if (here.ambientUntil > f) add(999, place(seat.x + 13, seat.y - 9, gridSvg(`amb-${role.prop}`, icon(role.prop), paletteFor(here.role))))
+      if (rm?.need) {
+        // a human is needed: the bubble stays up (bobbing), never hidden by ambient props
+        const bob = Math.floor(f / 6) % 2
+        add(999, fade(place(seat.x + 12, seat.y - 10 - bob, gridSvg(`need-${rm.need}`, rm.need === 'blocked' ? BUBBLE_STOP : BUBBLE_ASK, FURN_PAL))))
+      } else if (here.ambientUntil > f) add(999, place(seat.x + 13, seat.y - 9, gridSvg(`amb-${role.prop}`, icon(role.prop), paletteFor(here.role))))
       else if (here.state === 'waiting' && Math.floor(f / 8) % 2) add(999, place(seat.x + 12, seat.y - 7, gridSvg('dots', BUBBLE_DOTS, FURN_PAL)))
     }
 
@@ -868,6 +899,9 @@ export class Office {
 
   dot(w: Worker): string {
     if (w.status === 'failed') return '#d9483b'
+    if (w.remote?.stale && !w.ending) return '#b4b9c4'
+    if (w.remote?.need === 'blocked' && !w.ending) return '#e8692b'
+    if (w.remote?.need === 'waiting' && !w.ending) return '#e8b923'
     if (w.ending) return '#e8b923'
     if (w.status === 'running') return '#3c7be0'
     if (w.status === 'completed' || w.status === 'idle') return '#3fae5a'
@@ -879,6 +913,7 @@ export class Office {
     const working = ws.filter(w => w.seated && w.status === 'running').length
     const coming = ws.filter(w => !w.seatedOnce).length
     const leaving = ws.filter(w => w.ending).length
+    const needed = ws.filter(w => w.remote?.need && !w.remote.stale && !w.ending).length
     const b = this.boss
     const bossNote = b.errand ? (b.item ? `boss is bringing back a ${b.item}` : 'boss is on a drink run')
       : !b.seated ? 'boss is walking a message over'
@@ -886,10 +921,15 @@ export class Office {
       : this.lounging() ? `boss is idly ${this.idleWord()}`
       : this.bossWorking ? 'boss is busy' : 'boss is idle'
     if (!ws.length) return `no one at work · ${bossNote}`
-    return [working ? `${working} working` : '', coming ? `${coming} arriving` : '', leaving ? `${leaving} handing in` : '', bossNote].filter(Boolean).join(' · ')
+    return [needed ? `${needed} need${needed === 1 ? 's' : ''} you` : '', working ? `${working} working` : '', coming ? `${coming} arriving` : '', leaving ? `${leaving} handing in` : '', bossNote].filter(Boolean).join(' · ')
   }
 
   textLines(): Array<{ dot: string; title: string; label: string }> {
-    return [...this.workers.values()].map(w => ({ dot: this.dot(w), title: ROLES[w.role].title, label: w.label }))
+    return [...this.workers.values()].map(w => ({ dot: this.dot(w), title: ROLES[w.role].title, label: w.remote ? this.remoteLabel(w, w.remote) : w.label }))
+  }
+
+  private remoteLabel(w: Worker, r: RemoteInfo): string {
+    const tail = r.stale ? ` (stale ${r.ageMin}m)` : r.need ? ` — ${r.need.toUpperCase()}${r.note ? `: ${r.note}` : ''}` : ''
+    return `[${r.source}] ${w.label}${tail}`
   }
 }

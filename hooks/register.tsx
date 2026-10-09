@@ -6,6 +6,9 @@
 //   /office-space        open or close the Office Space panel
 //   /office-space band   show or hide the small version above the prompt
 //
+// Work running outside the session appears too: any script can drop one JSON
+// file per worker into the workers directory (see ./external.ts and README).
+//
 // Art and roles: ./sprites.ts. Layout, walking and handoffs: ./office.ts.
 
 import { atom, read, update } from 'claude-code'
@@ -13,6 +16,8 @@ import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 
 import { FLOOR, Office, SCALE } from './office'
 import type { AgentLike } from './office'
+import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, expandDir, isWorkerFile, parseWorker, toAgents } from './external'
+import type { ExternalWorker } from './external'
 
 const open = atom({ plugin: 'office-space', key: 'open' } as const, false)
 const PANE = 'office-space'
@@ -30,6 +35,59 @@ let paneOpen = false
 let bandOn = false
 let reported = false
 
+// ----- external workers -----
+const EXTERNAL_EVERY_MS = 5000
+let workersDir = DEFAULT_DIR // as configured; resolved against $HOME on first read
+let staleMinutes = DEFAULT_STALE_MINUTES
+let resolvedDir: string | null = null
+let externalAt = 0
+let external: ExternalWorker[] = []
+const fileCache = new Map<string, { mtimeMs: number; size: number; worker: ExternalWorker | null }>()
+
+/**
+ * Reads the workers directory at most every EXTERNAL_EVERY_MS: one listing,
+ * then a read only for files that changed since last time. A missing
+ * directory, unreadable file or malformed JSON is simply no worker.
+ */
+async function readExternal($: EngineInterface): Promise<ExternalWorker[]> {
+  const now = Date.now()
+  if (externalAt && now - externalAt < EXTERNAL_EVERY_MS) return external
+  externalAt = now
+  try {
+    if (resolvedDir === null) {
+      const env = await $.env.get('OFFICE_SPACE_WORKERS_DIR')
+      resolvedDir = expandDir(env || workersDir, await $.env.get('HOME'))
+    }
+    const entries = await $.fs.list(resolvedDir)
+    const names = new Set<string>()
+    const next: ExternalWorker[] = []
+    for (const ent of entries) {
+      if (ent.kind !== 'file' || !isWorkerFile(ent.name)) continue
+      names.add(ent.name)
+      const hit = fileCache.get(ent.name)
+      if (hit && hit.mtimeMs === ent.mtimeMs && hit.size === ent.size) {
+        if (hit.worker) next.push(hit.worker)
+        continue
+      }
+      let worker: ExternalWorker | null = null
+      if (ent.size <= MAX_FILE_BYTES) {
+        try {
+          const text = await $.fs.read(`${resolvedDir}/${ent.name}`)
+          worker = typeof text === 'string' ? parseWorker(text, ent.name, ent.mtimeMs) : null
+        } catch {}
+      }
+      fileCache.set(ent.name, { mtimeMs: ent.mtimeMs, size: ent.size, worker })
+      if (worker) next.push(worker)
+    }
+    for (const k of [...fileCache.keys()]) if (!names.has(k)) fileCache.delete(k)
+    external = next
+  } catch {
+    external = [] // no directory (yet): nobody remote
+    fileCache.clear()
+  }
+  return external
+}
+
 async function poll($: EngineInterface): Promise<void> {
   let list: AgentInfo[] = []
   try {
@@ -37,7 +95,8 @@ async function poll($: EngineInterface): Promise<void> {
   } catch {
     list = []
   }
-  office.sync(list as AgentLike[])
+  const remote = toAgents(await readExternal($), Date.now(), staleMinutes)
+  office.sync([...(list as AgentLike[]), ...remote])
   if (office.eotdDirty) {
     office.eotdDirty = false
     try { await $.store.set(eotdKey(), Object.fromEntries(office.eotd)) } catch {}
@@ -110,6 +169,7 @@ async function setOpen($: EngineInterface, on: boolean) {
   await update($, open, () => on)
   if (on) {
     office = new Office()
+    externalAt = 0
     await loadEotd($)
     await poll($)
     start($)
@@ -118,7 +178,12 @@ async function setOpen($: EngineInterface, on: boolean) {
   }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const opts = (options ?? {}) as { workersDir?: unknown; staleMinutes?: unknown }
+  if (typeof opts.workersDir === 'string' && opts.workersDir.trim()) workersDir = opts.workersDir
+  const sm = Number(opts.staleMinutes)
+  if (Number.isFinite(sm) && sm > 0) staleMinutes = sm
+
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'office-space',

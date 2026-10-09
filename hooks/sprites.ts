@@ -351,6 +351,10 @@ export const CHECK: Grid = outline(padded(['......V.', '.....VV.', 'V...VV..', '
 export const PACKET_OK: Grid = outline(padded(['WWWW', 'WxxW', 'WWWW', 'WxxW', 'WWWW']))
 export const PACKET_ERR: Grid = outline(padded(['RRRR', 'RWWR', 'RRRR', 'RWWR', 'RRRR']))
 export const BUBBLE_DOTS: Grid = outline(padded(['WWWWWW', 'WEWEWE'.replace(/E/g, 'x'), 'WWWWWW', '.W....']))
+/** Remote worker waiting on a human: a speech bubble with a question mark. */
+export const BUBBLE_ASK: Grid = outline(padded(['WWWWWWW', 'WWRRRWW', 'WWWWRWW', 'WWWRRWW', 'WWWWWWW', 'WWWRWWW', 'WWWWWWW', '.W.....']))
+/** Remote worker blocked: a red bubble with an exclamation mark. */
+export const BUBBLE_STOP: Grid = outline(padded(['RRRRRRR', 'RRRWRRR', 'RRRWRRR', 'RRRWRRR', 'RRRRRRR', 'RRRWRRR', 'RRRRRRR', '.R.....']))
 
 /** A worker doing a push-up, side view (22 x 10), arms straight (up) or bent. */
 export function pushup(role: RoleId, up: boolean): Grid {

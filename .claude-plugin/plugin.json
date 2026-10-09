@@ -1,7 +1,25 @@
 {
   "name": "office-space",
-  "version": "0.6.0",
-  "description": "Subagents as 16-bit office workers above the prompt. Toggle with /office-space.",
-  "author": { "name": "Robert Conklin" },
-  "types": "./types/index.d.ts"
+  "version": "0.7.0",
+  "description": "Subagents as 16-bit office workers above the prompt, plus external workers from a watched folder. Toggle with /office-space.",
+  "author": {
+    "name": "Robert Conklin"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "workersDir": {
+      "type": "string",
+      "title": "External workers folder",
+      "description": "Folder of worker JSON files to show in the office (OFFICE_SPACE_WORKERS_DIR overrides it).",
+      "default": "~/.claude/office-space/workers",
+      "required": false
+    },
+    "staleMinutes": {
+      "type": "number",
+      "title": "Stale after (minutes)",
+      "description": "An external worker not updated for this long is drawn faded; after 4x this long it leaves.",
+      "default": 15,
+      "required": false
+    }
+  }
 }

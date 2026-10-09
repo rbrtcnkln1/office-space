@@ -183,3 +183,5 @@ MIT — see [LICENSE](LICENSE).
 ## Watch the teaser
 
 [![Office Space teaser — click to play (37 s)](docs/media/teaser-thumbnail.png)](https://github.com/rbrtcnkln1/office-space/releases/download/v0.8.1/office-space-teaser.mp4)
+
+https://github.com/user-attachments/assets/13b7944a-4ba9-4aa3-b2d8-5ad59e323084

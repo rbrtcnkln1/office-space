@@ -10,6 +10,7 @@ import {
   BUBBLE_ASK, BUBBLE_DOTS, BUBBLE_STOP, CHECK, PACKET_ERR, PACKET_OK, ROLES, character, feetUp, grid, icon, outline, paletteFor, pushup, roleFor,
 } from './sprites'
 import type { Dir, Grid, Palette, RoleId } from './sprites'
+import { sanitize } from './external'
 import type { RemoteInfo } from './external'
 
 // ---------- Tunables ----------
@@ -115,7 +116,7 @@ function hash(s: string): number {
 }
 const short = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 // control characters are invalid in XML and would break the whole drawing
-const esc = (s: string) => s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
+const esc = (s: string) => sanitize(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
 
 /** Grid → one <path> per colour, each pixel run a tiny rect. Cached per key. */
 const pathCache = new Map<string, string>()
@@ -303,13 +304,13 @@ export class Office {
     const seen = new Set<string>()
     for (const a of agents) {
       seen.add(a.id)
-      const label = a.description || a.name || a.type || a.id
+      const label = sanitize(a.description || '') || sanitize(a.name || '') || sanitize(a.type || '') || sanitize(a.id)
       let w = this.workers.get(a.id)
       if (!w) {
         if (!ACTIVE.has(a.status)) continue // already finished before we saw it: nobody to draw
         const seed = hash(a.id + label)
         w = {
-          id: a.id, name: a.name, label, role: roleFor(`${label} ${a.type}`, seed), status: a.status, state: 'idle', desk: -1, seed,
+          id: a.id, name: sanitize(a.name || ''), label, role: roleFor(`${label} ${a.type}`, seed), status: a.status, state: 'idle', desk: -1, seed,
           pos: this.door(), facing: 'right', seated: false, plan: [], walkFrame: 0, reaching: false, carrying: false,
           ambientUntil: 0, seatedOnce: false, ending: false, hidden: false, activity: null, item: null, sipUntil: 0,
           ...(a.remote ? { remote: a.remote } : {}),
@@ -321,7 +322,7 @@ export class Office {
       }
       const before = w.status
       w.status = a.status
-      w.name = a.name
+      w.name = sanitize(a.name || '')
       w.label = label
       if (a.remote) w.remote = a.remote
       if (ACTIVE.has(before) && !ACTIVE.has(a.status)) this.finish(w)

@@ -90,7 +90,7 @@ Put one JSON file per worker in the workers folder:
 | `id` | no | Unique per worker. Defaults to the file name without `.json` |
 | `name` | no | Display name. Defaults to `id` |
 | `task` | no | What it's doing. Shown under the desk |
-| `updated` | no | ISO 8601 time or epoch milliseconds. Defaults to the file's modified time |
+| `updated` | no | ISO 8601 time or epoch milliseconds. Defaults to the file's modified time, which is also used if the time is more than 5 minutes in the future |
 | `source` | no | A short label for the desk badge, such as `remote`, `cron` or `laptop`. Defaults to `remote` |
 | `note` | no | What a human needs to do. Shown instead of the task while the worker is waiting or blocked |
 

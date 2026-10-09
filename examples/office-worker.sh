@@ -6,21 +6,30 @@ set -eu
 [ "$#" -ge 2 ] || { echo "usage: $0 <id> <status> \"<task>\" [\"<note>\"]" >&2; exit 2; }
 
 id="$1"; status="$2"; task="${3:-}"; note="${4:-}"
+case $id in
+  ''|.*|*[!A-Za-z0-9._-]*) echo "office-worker: id must be letters, digits, . _ - (no leading dot)" >&2; exit 2;;
+esac
+case $status in
+  working|waiting|blocked|done|failed) ;;
+  *) echo "office-worker: status must be working, waiting, blocked, done or failed" >&2; exit 2;;
+esac
 dir="${OFFICE_SPACE_WORKERS_DIR:-$HOME/.claude/office-space/workers}"
 mkdir -p "$dir"
+if [ -L "$dir/$id.json" ]; then echo "office-worker: $dir/$id.json is a symlink; refusing" >&2; exit 2; fi
 source_label="$(hostname -s)"
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-# Write to a hidden temp name, then rename, so the mod never reads half a file.
-tmp="$dir/.$id.tmp"
+# Write to a private hidden temp file, then rename, so the mod never reads half a file.
+tmp="$(mktemp "$dir/.office-worker.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
 if command -v jq >/dev/null 2>&1; then
   jq -n --arg id "$id" --arg status "$status" --arg task "$task" --arg note "$note" \
         --arg source "$source_label" --arg updated "$now" \
      '{id:$id, status:$status, task:$task, note:$note, source:$source, updated:$updated}' > "$tmp"
 else
-  # No jq: escape backslashes and quotes, and flatten newlines and tabs.
-  esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n\r\t' '   '; }
+  # No jq: drop control characters, escape backslashes and quotes, flatten newlines and tabs.
+  esc() { printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n\r\t' '   '; }
   printf '{"id":"%s","status":"%s","task":"%s","note":"%s","source":"%s","updated":"%s"}\n' \
     "$(esc "$id")" "$(esc "$status")" "$(esc "$task")" "$(esc "$note")" "$(esc "$source_label")" "$now" > "$tmp"
 fi
-mv "$tmp" "$dir/$id.json"
+mv -f "$tmp" "$dir/$id.json"

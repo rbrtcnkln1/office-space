@@ -16,6 +16,7 @@ Issues and pull requests are welcome.
    claude plugin validate plugin
    bash scripts/test.sh
    ```
+4. After a release is pushed, run `claude plugin update office-space@office-space` (Claude Code 2.1.29x or newer), then start a new session. The desktop app loads the copy cached at install time, not your live folder, so until you do this it keeps running the previous version.
 
 ## Ground rules
 

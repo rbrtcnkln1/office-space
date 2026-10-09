@@ -216,6 +216,12 @@ bash scripts/test.sh
 
 Found a bug or have an idea? Run `/office-space-feedback` or open an issue: https://github.com/rbrtcnkln1/office-space/issues/new/choose. You'll need a free GitHub account. Nothing is sent automatically.
 
+## Buy me a coffee
+
+Office Space is free and always will be. If it made your day a little more fun, you can tip the staff a coffee:
+
+[![Buy me a coffee](https://img.shields.io/badge/%E2%98%95%20Buy%20me%20a%20coffee-c0392b?style=for-the-badge)](https://buy.stripe.com/bJeeVd30A2o86zEahZ18c00)
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

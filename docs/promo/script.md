@@ -1,5 +1,7 @@
 # Teaser script (37 s)
 
+Rough-cut video (silent, 3.3 MB, kept out of git to keep installs small): [office-space-teaser.mp4](https://github.com/rbrtcnkln1/office-space/releases/download/v0.8.1/office-space-teaser.mp4) on the v0.8.1 release.
+
 > **Draft status.** The first version of this script and the storyboard was written by Codex CLI from the public README text. It was then edited by hand (see "Review notes" below). It is a rough cut to react to, not final copy. Voiceover is a placeholder: the video has no audio.
 
 Tone: a 1990s workplace-comedy trailer. Deadpan, dry, cubicle humor, trailer-voiceover cadence. Original jokes only.

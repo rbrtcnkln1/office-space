@@ -1,6 +1,6 @@
 # Teaser storyboard (37 s, 1280x720, 24 fps)
 
-> **Draft status.** Started from a Codex CLI draft, then adjusted to what the renderer actually produces. Every clip is real renderer output from `scripts/media/frames.ts`, sped up (time-lapse) to fit its slot. The rough cut is `office-space-teaser.mp4` (silent, captions and a "VO:" subtitle burned in so a reviewer can follow the intended voiceover).
+> **Draft status.** Started from a Codex CLI draft, then adjusted to what the renderer actually produces. Every clip is real renderer output from `scripts/media/frames.ts`, sped up (time-lapse) to fit its slot. The rough cut is [`office-space-teaser.mp4`](https://github.com/rbrtcnkln1/office-space/releases/download/v0.8.1/office-space-teaser.mp4) (a v0.8.1 release asset; silent, captions and a "VO:" subtitle burned in so a reviewer can follow the intended voiceover).
 
 | Timecode | Shot | Source and treatment | Caption | Transition |
 | --- | --- | --- | --- | --- |

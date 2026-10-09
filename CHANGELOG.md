@@ -2,6 +2,12 @@
 
 Every release bumps `version` in `.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## Unreleased
+Docs and media only, no version bump.
+- README animations (GIFs rendered from the real office).
+- Promo script and storyboard.
+- Reproducible media generator in `scripts/media/`.
+
 ## 0.8.1 — 2026-10-08
 Updating and feedback.
 - `/office-space-update` checks GitHub for a newer version and updates through `claude plugin update`; if that is not possible it prints the manual steps, and copies read from a local folder get a pull hint instead.

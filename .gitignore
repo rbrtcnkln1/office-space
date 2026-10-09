@@ -7,3 +7,4 @@ node_modules/
 
 # generated media frames (scripts/media)
 scripts/media/.work/
+docs/promo/*.mp4

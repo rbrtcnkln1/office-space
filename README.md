@@ -22,6 +22,33 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
    ```
    Four fake workers start, get blocked or need approval, then finish or fail, and the demo cleans up after itself. Or just ask Claude to run a few subagents.
 
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `/office-space` | Open or close the Office Space panel |
+| `/office-space band` | Show or hide the small office strip above the prompt |
+
+### Settings
+
+The settings are optional and have defaults. Change them in `/plugin` → office-space → configure (or `/config`).
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `workersDir` (External workers folder) | `~/.claude/office-space/workers` | Folder of worker JSON files to show |
+| `staleMinutes` (Stale after) | `15` | Minutes without an update before an external worker fades. After 4× that time it leaves |
+
+### Environment variable
+
+`OFFICE_SPACE_WORKERS_DIR` overrides the workers folder. It wins over the setting.
+
+### Scripts
+
+- `examples/office-worker.sh`: writes or updates one worker file safely. Usage: `bash examples/office-worker.sh <id> <working|waiting|blocked|done|failed> "<task>" ["<note>"]`
+- `examples/demo.sh`: a 60-second demo with fake workers. Usage: `bash examples/demo.sh`
+
+More commands (customize the Boss, your team and the office) are planned — see the [roadmap issues](https://github.com/rbrtcnkln1/office-space/issues).
+
 ## Requirements
 
 A Claude Code version that supports plugin hook modules (2.1.29x or newer); older versions reject the plugin. It works in the terminal and in the desktop app's Code tab.

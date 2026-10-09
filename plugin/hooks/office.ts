@@ -18,6 +18,8 @@ import type { RemoteInfo } from './external'
 export const SCALE = 2 // CSS px per logical pixel at natural size
 const MIN_DESKS = 5 // always at least this many desks
 const SPARE_DESKS = 2 // keep this many empty desks for newcomers
+const ANNEX = 1000 // desk slots from here up belong to the remote annex (slot - ANNEX indexes `annex`)
+const ANNEX_GAP = 24// room above the annex for its sign
 const CELL_W = 64
 const ROW_H = 50
 const MARGIN = 24 // walking corridor down each side
@@ -229,6 +231,7 @@ const STATIC = {
 export class Office {
   workers = new Map<string, Worker>()
   desks: Array<string | null> = Array.from({ length: MIN_DESKS }, () => null)
+  annex: Array<string | null> = [] // the remote annex: external workers' own desk row(s); empty when nobody is remote
   cols = MIN_DESKS
   boss: Boss
   queue: string[] = []
@@ -244,15 +247,23 @@ export class Office {
 
   // ----- geometry -----
   get rows() { return Math.ceil(this.desks.length / this.cols) }
+  get annexRows() { return Math.ceil(this.annex.length / this.cols) }
   get width() { return MARGIN * 2 + this.cols * CELL_W }
-  get height() { return this.rowY(this.rows - 1) + 46 }
+  get height() { return (this.annexRows ? this.annexRowY(this.annexRows - 1) : this.rowY(this.rows - 1)) + 46 }
+  /** Top of the first annex row: one desk row below the last local one, plus room for the sign. */
+  annexRowY(r: number) { return this.rowY(this.rows) + ANNEX_GAP + r * ROW_H }
   bossX() { return MARGIN + 6 } // left, right by the door
   bossY() { return TOP }
   bossSeat(): Pt { return { x: this.bossX() + 40, y: this.bossY() } }
   frontY() { return this.bossY() + 20 } // standing right at the boss desk
   aisleY() { return this.bossY() + 24 } // the walkway between the boss and row 1
   rowY(r: number) { return this.bossY() + 48 + r * ROW_H }
-  cell(slot: number) { const r = Math.floor(slot / this.cols); const c = slot % this.cols; return { x: MARGIN + c * CELL_W, y: this.rowY(r), r, c } }
+  cell(slot: number) {
+    const i = slot >= ANNEX ? slot - ANNEX : slot
+    const r = Math.floor(i / this.cols)
+    const c = i % this.cols
+    return { x: MARGIN + c * CELL_W, y: slot >= ANNEX ? this.annexRowY(r) : this.rowY(r), r, c }
+  }
   seatOf(slot: number): Pt { const c = this.cell(slot); return { x: c.x + 18, y: c.y } }
   gapX(slot: number) { return this.cell(slot).x - 6 }
   frontOf(slot: number) { return this.cell(slot).y + 22 }
@@ -282,7 +293,23 @@ export class Office {
 
   /** Grows the floor to keep spare desks; shrinks only when nobody is walking. */
   private layout() {
-    const holding = [...this.workers.values()].filter(w => w.desk >= 0).length
+    this.layoutMain()
+    this.layoutAnnex()
+  }
+
+  /** Annex desks: whole rows as wide as the floor, one spare desk, none at all without remote workers. */
+  private layoutAnnex() {
+    const holding = [...this.workers.values()].filter(w => w.desk >= ANNEX).length
+    const total = holding ? Math.ceil((holding + 1) / this.cols) * this.cols : 0
+    if (total === this.annex.length) return
+    const walking = [...this.workers.values()].some(w => w.plan.length) || this.boss.plan.length > 0
+    if (total < this.annex.length && walking) return
+    if (this.annex.some((id, i) => id && i >= total)) return // never yank a desk out from under someone
+    this.annex = Array.from({ length: total }, (_, i) => this.annex[i] ?? null)
+  }
+
+  private layoutMain() {
+    const holding = [...this.workers.values()].filter(w => w.desk >= 0 && w.desk < ANNEX).length
     const want = Math.max(MIN_DESKS, holding + SPARE_DESKS)
     const walking = [...this.workers.values()].some(w => w.plan.length) || this.boss.plan.length > 0
     if (want < this.desks.length && walking) return
@@ -337,7 +364,23 @@ export class Office {
     this.initialized = true
   }
 
+  private setDesk(slot: number, id: string | null) {
+    if (slot >= ANNEX) this.annex[slot - ANNEX] = id
+    else if (slot >= 0) this.desks[slot] = id
+  }
+
   private claimDesk(w: Worker): boolean {
+    if (w.remote) {
+      // external workers sit in the annex, never at a local desk
+      let i = this.annex.indexOf(null)
+      if (i < 0) {
+        i = this.annex.length
+        this.annex.push(...Array.from({ length: this.cols }, () => null))
+      }
+      this.annex[i] = w.id
+      w.desk = ANNEX + i
+      return true
+    }
     let slot = this.desks.indexOf(null)
     if (slot < 0) {
       this.desks.push(...Array.from({ length: Math.max(1, SPARE_DESKS) }, () => null))
@@ -366,7 +409,7 @@ export class Office {
 
   private dismiss(id: string) {
     const w = this.workers.get(id)
-    if (w && w.desk >= 0) this.desks[w.desk] = null
+    if (w) this.setDesk(w.desk, null)
     this.workers.delete(id)
     this.queue = this.queue.filter(q => q !== id)
   }
@@ -442,7 +485,7 @@ export class Office {
         w.carrying = !quiet
         if (!quiet) this.queue.push(w.id)
         w.plan.unshift({ k: 'walk', path: this.fromDesk(slot), speed })
-        if (slot >= 0) this.desks[slot] = null
+        this.setDesk(slot, null)
         w.desk = -1
       } },
     ]
@@ -753,9 +796,17 @@ export class Office {
     if (b.item) add(b.seated ? by + 17 : b.pos.y + 20.7, this.itemSvg(b.item, bAt, b.seated, f))
 
     // desks
-    for (let slot = 0; slot < this.desks.length; slot++) {
+    if (this.annex.length) {
+      // the remote annex: a sign and a dashed line set its row apart from the local desks
+      const ay = this.annexRowY(0)
+      const sw = 44
+      out.push(`<rect x="${MARGIN}" y="${ay - 18}" width="${this.cols * CELL_W}" height="0.8" fill="#4e6380" opacity="0.6"/>`)
+      out.push(`<rect x="${MARGIN}" y="${ay - 22}" width="${sw}" height="8" fill="#1f8a7a"/><text x="${MARGIN + sw / 2}" y="${ay - 16.2}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="4.6" font-weight="700" fill="#ffffff">REMOTE ANNEX</text>`)
+    }
+    const slots = [...this.desks.map((_, i) => i), ...this.annex.map((_, i) => ANNEX + i)]
+    for (const slot of slots) {
       const c = this.cell(slot)
-      const wid = this.desks[slot]
+      const wid = slot >= ANNEX ? this.annex[slot - ANNEX] : this.desks[slot]
       const w = wid ? this.workers.get(wid) : undefined
       const here = w && w.seated ? w : undefined
       add(c.y + 9, place(c.x + 19, c.y + 9, STATIC.chair))
@@ -937,6 +988,17 @@ export class Office {
 
   textLines(): Array<{ dot: string; title: string; label: string }> {
     return [...this.workers.values()].map(w => ({ dot: this.dot(w), title: ROLES[w.role].title, label: w.remote ? this.remoteLabel(w, w.remote) : w.label }))
+  }
+
+  /** External workers waiting on a human right now (fresh, not leaving): what a press shows. */
+  needing(): Array<{ id: string; who: string; dot: string; need: 'waiting' | 'blocked'; source: string; task: string; note?: string; url?: string }> {
+    const out: Array<{ id: string; who: string; dot: string; need: 'waiting' | 'blocked'; source: string; task: string; note?: string; url?: string }> = []
+    for (const w of this.workers.values()) {
+      const r = w.remote
+      if (!r?.need || r.stale || w.ending) continue
+      out.push({ id: w.id, who: w.name || ROLES[w.role].title, dot: this.dot(w), need: r.need, source: r.source, task: w.label, ...(r.note ? { note: r.note } : {}), ...(r.url ? { url: r.url } : {}) })
+    }
+    return out
   }
 
   private remoteLabel(w: Worker, r: RemoteInfo): string {

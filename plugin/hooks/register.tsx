@@ -21,12 +21,13 @@ import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 import { FLOOR, Office, SCALE } from './office'
 import { ROLES } from './sprites'
 import type { AgentLike } from './office'
-import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, expandDir, inScope, isWorkerFile, normalizePath, parseWorker, toAgents } from './external'
+import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, expandDir, inScope, alertText, isWorkerFile, newlyNeeding, normalizePath, parseWorker, toAgents } from './external'
 import type { ExternalWorker } from './external'
 import { compareVersions, feedbackText, installedVersion, latestVersion, parseVersion, toastText, updateOffice } from './update'
 import type { UpdateIo } from './update'
 
 const open = atom({ plugin: 'office-space', key: 'open' } as const, false)
+const selected = atom({ plugin: 'office-space', key: 'selected' } as const, '') // the worker whose note is showing
 const PANE = 'office-space'
 const STORE_PANE = 'pane'
 const STORE_BAND = 'band'
@@ -34,6 +35,11 @@ const STORE_UPDATE_CHECKED = 'updateChecked'
 const DAY_MS = 24 * 60 * 60 * 1000
 const FETCH_TIMEOUT_MS = 8000
 let checkForUpdates = false
+let alertOnBlocked = true
+const ALERT_EVERY_MS = 5000
+let alertTimer: { cancel: () => void } | null = null
+let needKnown: Set<string> = new Set() // workers in a waiting/blocked stint (so a stint toasts once)
+let alertQuiet = true // the first look after startup only records who is already waiting
 const TICK_MS = 100
 const POLL_EVERY = 10 // ticks between agent-list reads
 const MAX_BAND_PX = 460 // tallest the band version may draw on desktop (about half a laptop window)
@@ -63,7 +69,7 @@ const fileCache = new Map<string, { mtimeMs: number; size: number; worker: Exter
  * or huge folder never holds up the animation tick.
  */
 async function readExternal($: EngineInterface): Promise<ExternalWorker[]> {
-  const now = Date.now()
+  const now = await $.clock.now()
   if (externalBusy || (externalAt && now - externalAt < EXTERNAL_EVERY_MS)) return external
   const first = !externalAt
   externalAt = now
@@ -163,11 +169,30 @@ async function poll($: EngineInterface): Promise<void> {
     list = []
   }
   const remote = toAgents(await visibleHere($, await readExternal($)), Date.now(), staleMinutes)
+  checkAlerts($, remote)
   office.sync([...(list as AgentLike[]), ...remote])
   if (office.eotdDirty) {
     office.eotdDirty = false
     try { await $.store.set(eotdKey(), Object.fromEntries(office.eotd)) } catch {}
   }
+}
+
+/** One toast when external workers newly need you; none while a stint holds. Never throws. */
+function checkAlerts($: EngineInterface, remote: AgentLike[]): void {
+  if (!alertOnBlocked) return
+  try {
+    const r = newlyNeeding(needKnown, remote, alertQuiet)
+    needKnown = r.known
+    alertQuiet = false
+    if (r.fresh.length) $.ui.toast(alertText(r.fresh))
+  } catch {}
+}
+
+/** Watches the workers folder for alerts even while the office is closed. */
+async function watchAlerts($: EngineInterface): Promise<void> {
+  try {
+    checkAlerts($, toAgents(await visibleHere($, await readExternal($)), Date.now(), staleMinutes))
+  } catch {}
 }
 
 /** Employee of the Day counts are kept per calendar day, across reloads. */
@@ -379,9 +404,56 @@ export function helpText(): string {
     'Office Space commands:',
     ...lines,
     '',
-    'Settings (/plugin -> office-space -> configure): workersDir, staleMinutes, checkForUpdates.',
+    'Settings (/plugin -> office-space -> configure): workersDir, staleMinutes, alertOnBlocked, checkForUpdates.',
     'Docs: https://github.com/rbrtcnkln1/office-space#readme',
   ].join('\n')
+}
+
+type RenderInput = Parameters<EngineInterface['ui']['resolve']>[0]
+
+/**
+ * The waiting/blocked external workers as pressable rows (Svg cannot take a
+ * press, so this sits beside the drawing on every surface). Pressing one
+ * shows its note and, when it left one, its http(s) address as text plus a
+ * copy button. Nothing is ever opened.
+ */
+function needsView($: EngineInterface, e: RenderInput, sel: string, hotkeys: boolean) {
+  const list = office.needing()
+  if (!list.length) return null
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const cur = list.find(n => n.id === sel)
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>Needs you - press one to read its note</Text>
+      {list.slice(0, 9).map((n, i) => (
+        <Button
+          key={`need:${n.id}`}
+          label={`${n.need === 'blocked' ? 'BLOCKED' : 'WAITING'}: ${n.who}${n.id === sel ? ' (showing)' : ''}`}
+          {...(hotkeys ? { hotkey: String(i + 1) } : {})}
+          onPress={() => { void update($, selected, v => (v === n.id ? '' : n.id)) }}
+        />
+      ))}
+      {cur ? (
+        <Box flexDirection="column">
+          <Text bold>{`${cur.who} [${cur.source}] is ${cur.need}`}</Text>
+          <Text>{cur.note ?? `No note left. Task: ${cur.task}`}</Text>
+          {cur.url ? <Text>{cur.url}</Text> : null}
+          {cur.url ? (
+            <Button
+              key="need-copy"
+              label="Copy link"
+              onPress={press => {
+                void (async () => {
+                  const r = await $.ui.copy({ text: cur.url as string, surface: press.surface })
+                  $.ui.toast(r.isCopied ? 'Office Space: link copied' : 'Office Space: could not copy, select the link above')
+                })()
+              }}
+            />
+          ) : null}
+        </Box>
+      ) : null}
+    </Box>
+  )
 }
 
 export const register: Register = (on, options) => {
@@ -391,6 +463,8 @@ export const register: Register = (on, options) => {
   if (Number.isFinite(sm) && sm > 0) staleMinutes = sm
   const cu = (options as { checkForUpdates?: unknown } | undefined)?.checkForUpdates
   checkForUpdates = cu === true || cu === 'true'
+  const ab = (options as { alertOnBlocked?: unknown } | undefined)?.alertOnBlocked
+  alertOnBlocked = !(ab === false || ab === 'false')
 
   on('session.start', async ($, e, next) => {
     for (const c of COMMANDS) {
@@ -407,6 +481,10 @@ export const register: Register = (on, options) => {
     } catch {}
     if (paneOpen || bandOn) await setOpen($, true)
     if (checkForUpdates) void dailyUpdateCheck($)
+    if (alertOnBlocked && !alertTimer) {
+      void watchAlerts($)
+      alertTimer = $.clock.every(ALERT_EVERY_MS, () => { void watchAlerts($) })
+    }
     // Not reopened here: the app restores panels itself, and reopening from
     // code would put the panel back in its default spot.
     return next(e)
@@ -443,13 +521,16 @@ export const register: Register = (on, options) => {
       // A floor-coloured box exactly as tall as the panel's body (in the panel's
       // own rows), so the app fills every pixel below the drawing too.
       const rows = e.props.scroll?.bodyRows || 0
+      const sel = await read($, selected)
       return (
         <Box flexDirection="column" backgroundColor={FLOOR} width="100%" height={rows > 0 ? rows : '100%'} flexGrow={1}>
           <Svg source={office.render(PANE_SCALE)} alt={`Office: ${office.summary()}`} />
+          {needsView($, e, sel, true)}
         </Box>
       )
     }
     const { Box, Text } = $.ui.resolve(e)
+    const sel = await read($, selected)
     return (
       <Box flexDirection="column">
         <Text bold color="#e0706a">◆ office space <Text dimColor>{office.summary()}</Text></Text>
@@ -460,6 +541,7 @@ export const register: Register = (on, options) => {
             <Text dimColor>{l.label}</Text>
           </Text>
         ))}
+        {needsView($, e, sel, true)}
       </Box>
     )
   })
@@ -470,8 +552,9 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey || !bandOn || !(await read($, open))) return next(e)
     await catchUp($)
 
+    const sel = await read($, selected)
     if (e.surface === 'desktop') {
-      const { Svg } = $.ui.resolve(e)
+      const { Svg, Box } = $.ui.resolve(e)
       const naturalW = office.width * SCALE
       const naturalH = office.height * SCALE
       // Use the room the band is given (maxRows), up to MAX_BAND_PX.
@@ -479,12 +562,15 @@ export const register: Register = (on, options) => {
       const maxW = Math.max(320, (e.props.bodyColumns || 100) * 8)
       const k = Math.min(1, maxH / naturalH, maxW / naturalW)
       return (
-        <Svg
-          source={office.render()}
-          alt={`Office: ${office.summary()}`}
-          width={Math.floor(naturalW * k)}
-          height={Math.floor(naturalH * k)}
-        />
+        <Box flexDirection="column">
+          <Svg
+            source={office.render()}
+            alt={`Office: ${office.summary()}`}
+            width={Math.floor(naturalW * k)}
+            height={Math.floor(naturalH * k)}
+          />
+          {needsView($, e, sel, false)}
+        </Box>
       )
     }
 
@@ -499,6 +585,7 @@ export const register: Register = (on, options) => {
             <Text dimColor>{l.label}</Text>
           </Text>
         ))}
+        {needsView($, e, sel, false)}
       </Box>
     )
   })

@@ -37,32 +37,50 @@ let reported = false
 
 // ----- external workers -----
 const EXTERNAL_EVERY_MS = 5000
+const MAX_FILES = 200 // newest worker files read per poll
 let workersDir = DEFAULT_DIR // as configured; resolved against $HOME on first read
 let staleMinutes = DEFAULT_STALE_MINUTES
 let resolvedDir: string | null = null
 let externalAt = 0
 let external: ExternalWorker[] = []
+let externalBusy = false
 const fileCache = new Map<string, { mtimeMs: number; size: number; worker: ExternalWorker | null }>()
 
 /**
- * Reads the workers directory at most every EXTERNAL_EVERY_MS: one listing,
- * then a read only for files that changed since last time. A missing
- * directory, unreadable file or malformed JSON is simply no worker.
+ * The external workers as last read. The first read is awaited; after that a
+ * refresh runs in the background at most every EXTERNAL_EVERY_MS, so a slow
+ * or huge folder never holds up the animation tick.
  */
 async function readExternal($: EngineInterface): Promise<ExternalWorker[]> {
   const now = Date.now()
-  if (externalAt && now - externalAt < EXTERNAL_EVERY_MS) return external
+  if (externalBusy || (externalAt && now - externalAt < EXTERNAL_EVERY_MS)) return external
+  const first = !externalAt
   externalAt = now
+  externalBusy = true
+  const run = refreshExternal($).finally(() => { externalBusy = false })
+  if (first) await run
+  else void run
+  return external
+}
+
+/**
+ * One listing, then a read only for files that changed since last time (the
+ * newest MAX_FILES). A missing directory, unreadable file or malformed JSON is
+ * simply no worker; a transient listing failure keeps the last good state.
+ */
+async function refreshExternal($: EngineInterface): Promise<void> {
   try {
     if (resolvedDir === null) {
       const env = await $.env.get('OFFICE_SPACE_WORKERS_DIR')
       resolvedDir = expandDir(env || workersDir, await $.env.get('HOME'))
     }
-    const entries = await $.fs.list(resolvedDir)
+    const entries = (await $.fs.list(resolvedDir))
+      .filter(ent => ent.kind === 'file' && isWorkerFile(ent.name))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(0, MAX_FILES)
     const names = new Set<string>()
     const next: ExternalWorker[] = []
     for (const ent of entries) {
-      if (ent.kind !== 'file' || !isWorkerFile(ent.name)) continue
       names.add(ent.name)
       const hit = fileCache.get(ent.name)
       if (hit && hit.mtimeMs === ent.mtimeMs && hit.size === ent.size) {
@@ -82,10 +100,14 @@ async function readExternal($: EngineInterface): Promise<ExternalWorker[]> {
     for (const k of [...fileCache.keys()]) if (!names.has(k)) fileCache.delete(k)
     external = next
   } catch {
-    external = [] // no directory (yet): nobody remote
-    fileCache.clear()
+    // no directory (yet): nobody remote. Any other failure: keep what we had.
+    let gone = true
+    try { gone = resolvedDir === null || !(await $.fs.exists(resolvedDir)) } catch {}
+    if (gone) {
+      external = []
+      fileCache.clear()
+    }
   }
-  return external
 }
 
 async function poll($: EngineInterface): Promise<void> {
@@ -165,15 +187,22 @@ async function openPane($: EngineInterface) {
   paneOpen = true
 }
 
+let running = false // the simulation is live (panel and/or band showing)
+
 async function setOpen($: EngineInterface, on: boolean) {
   await update($, open, () => on)
-  if (on) {
+  if (on && !running) {
+    // a fresh office only when it was closed: switching between panel and
+    // band keeps everyone where they are
+    running = true
     office = new Office()
     externalAt = 0
+    resolvedDir = null
     await loadEotd($)
     await poll($)
     start($)
-  } else {
+  } else if (!on && running) {
+    running = false
     stop()
   }
 }

@@ -33,3 +33,31 @@ test('/office-space band shows the office above the prompt', async ($, on) => {
   expect(await desk.find({ type: 'Svg' } as never)).toBeDefined()
   await desk.unmount()
 })
+
+test('switching between panel and band keeps the office as it is', async ($, on) => {
+  mock.clock(on)
+  let agents: unknown[] = []
+  on('ui.open', async () => ({ value: undefined }) as never)
+  on('agent.list', async () => ({ value: agents }) as never)
+  await $.command.run({ command: 'office-space', args: 'band' } as never) // opens on an empty office
+  agents = [{ id: 'n1', description: 'Late arrival', type: 'general-purpose', status: 'running' }]
+  const first = await $.ui.mount({ plugin: 'office-space', surface: 'terminal', ...BAND } as never)
+  expect(await first.find({ type: 'Text', text: /1 arriving/ })).toBeDefined() // walking in through the door
+  await first.unmount()
+  await $.command.run({ command: 'office-space', args: '' } as never) // open the panel too
+  const second = await $.ui.mount({ plugin: 'office-space', surface: 'terminal', ...BAND } as never)
+  // a fresh office would have seated the newcomer instantly ("1 working")
+  expect(await second.find({ type: 'Text', text: /1 arriving/ })).toBeDefined()
+  await second.unmount()
+})
+
+test('control characters in a description never reach the drawing', async ($, on) => {
+  mock.clock(on)
+  on('agent.list', async () => ({ value: [{ id: 'c1', description: 'Bell\u0007 and\u0001 friends', type: 'general-purpose', status: 'running' }] }) as never)
+  await $.command.run({ command: 'office-space', args: 'band' } as never)
+  const desk = await $.ui.mount({ plugin: 'office-space', surface: 'desktop', ...BAND } as never)
+  const svg = (await desk.find({ type: 'Svg' } as never)) as { props?: { source?: string } } | undefined
+  expect(svg?.props?.source).toContain('Bell and friends')
+  expect(/[\u0000-\u0008]/.test(svg?.props?.source ?? '')).toBe(false)
+  await desk.unmount()
+})

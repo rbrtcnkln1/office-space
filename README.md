@@ -6,14 +6,18 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 
 ## Quick start
 
-1. **Install.** In Claude Code:
+**Before you start:** run `claude --version` in a terminal — you need **2.1.29x or newer**. Older versions say "installed" but the office never loads; update Claude Code first.
+
+1. **Install.** In Claude Code in a terminal, run:
    ```
    /plugin install office-space --marketplace rbrtcnkln1/office-space
    ```
    The two settings shown after install (workers folder, staleness) are optional and have defaults.
 
-   **Or let Claude install it for you.** Paste this into Claude Code:
+   **Using the Claude desktop app?** `/plugin` commands aren't available in the desktop Code tab — paste this into a Code tab chat instead and Claude will run the install for you:
    > Install the Office Space mod for Claude Code: check that `claude --version` is 2.1.29x or newer (if older, tell me to update Claude Code instead). Then run `claude plugin marketplace add rbrtcnkln1/office-space` and `claude plugin install office-space@office-space`. When it's done, tell me to run `/reload-plugins` and then `/office-space`.
+
+   Afterwards, restart the app (or run `/reload-plugins`) and type `/office-space`.
 2. **Open the office.** Type `/office-space`. Run it again to close the panel. `/office-space-band` shows or hides a small version above the prompt. `/office-space-help` lists every command.
 3. **See it with some staff.** With the office open, clone this repo and run the 60-second demo in a terminal:
    ```bash

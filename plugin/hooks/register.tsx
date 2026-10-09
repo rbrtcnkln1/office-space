@@ -21,7 +21,7 @@ import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 import { FLOOR, Office, SCALE } from './office'
 import { ROLES } from './sprites'
 import type { AgentLike } from './office'
-import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, expandDir, isWorkerFile, parseWorker, toAgents } from './external'
+import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, expandDir, inScope, isWorkerFile, normalizePath, parseWorker, toAgents } from './external'
 import type { ExternalWorker } from './external'
 import { compareVersions, feedbackText, installedVersion, latestVersion, parseVersion, toastText, updateOffice } from './update'
 import type { UpdateIo } from './update'
@@ -121,6 +121,35 @@ async function refreshExternal($: EngineInterface): Promise<void> {
   }
 }
 
+/** Link-resolved path, or the path itself when it cannot be resolved. */
+async function realOf($: EngineInterface, p: string): Promise<string> {
+  try {
+    const st = await $.fs.stat(p, { resolve: true })
+    return st.realPath ?? p
+  } catch {
+    return p
+  }
+}
+
+/**
+ * Only the workers meant for this session's working folder. Unscoped workers
+ * always show; scoped ones need a known cwd (fail closed when it is missing).
+ */
+async function visibleHere($: EngineInterface, all: ExternalWorker[]): Promise<ExternalWorker[]> {
+  if (!all.some(w => w.scope)) return all
+  let cwd: string | undefined
+  let home: string | undefined
+  try { cwd = await $.session.cwd() } catch {}
+  try { home = (await $.env.get('HOME')) || undefined } catch {}
+  const real = new Map<string, string>()
+  if (cwd) {
+    const paths = new Set<string>([normalizePath(cwd)])
+    for (const w of all) for (const s of w.scope ?? []) paths.add(normalizePath(s, home))
+    for (const p of paths) real.set(p, await realOf($, p))
+  }
+  return all.filter(w => inScope(w.scope, cwd, home, p => real.get(p) ?? p))
+}
+
 async function poll($: EngineInterface): Promise<void> {
   let list: AgentInfo[] = []
   try {
@@ -128,7 +157,7 @@ async function poll($: EngineInterface): Promise<void> {
   } catch {
     list = []
   }
-  const remote = toAgents(await readExternal($), Date.now(), staleMinutes)
+  const remote = toAgents(await visibleHere($, await readExternal($)), Date.now(), staleMinutes)
   office.sync([...(list as AgentLike[]), ...remote])
   if (office.eotdDirty) {
     office.eotdDirty = false

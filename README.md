@@ -54,7 +54,7 @@ The settings are optional and have defaults. Change them in `/plugin` → office
 
 ### Scripts
 
-- `examples/office-worker.sh`: writes or updates one worker file safely. Usage: `bash examples/office-worker.sh <id> <working|waiting|blocked|done|failed> "<task>" ["<note>"]`
+- `examples/office-worker.sh`: writes or updates one worker file safely. Usage: `bash examples/office-worker.sh <id> <working|waiting|blocked|done|failed> "<task>" ["<note>"] ["<scope>"]`
 - `examples/demo.sh`: a 60-second demo with fake workers. Usage: `bash examples/demo.sh`
 
 More commands (customize the Boss, your team and the office) are planned — see the [roadmap issues](https://github.com/rbrtcnkln1/office-space/issues).
@@ -143,6 +143,17 @@ Put one JSON file per worker in the workers folder:
 | `updated` | no | ISO 8601 time or epoch milliseconds. Defaults to the file's modified time, which is also used if the time is more than 5 minutes in the future |
 | `source` | no | A short label for the desk badge, such as `remote`, `cron` or `laptop`. Defaults to `remote` |
 | `note` | no | What a human needs to do. Shown instead of the task while the worker is waiting or blocked |
+| `scope` | no | A folder path or an array of them, absolute (`~` means your home folder). The worker shows only in sessions whose working folder is that folder or inside it. Without `scope` it shows everywhere. A malformed `scope` skips the worker |
+
+### Limiting a worker to a project
+
+The workers folder is global to the machine, so by default every worker shows up in every Claude Code session, including unrelated projects. Add `scope` to keep a worker private to the folders it belongs to:
+
+```json
+{ "id": "nightly-backup", "status": "working", "scope": ["~/projects/photos", "/srv/backups"] }
+```
+
+Folders are compared as real paths (symlinks resolved) on a folder boundary, so `/a/b` matches `/a/b` and `/a/b/c` but not `/a/bc`. If the session's working folder cannot be read, only workers without a `scope` are shown.
 
 ### How workers appear
 
@@ -153,7 +164,7 @@ Put one JSON file per worker in the workers folder:
 - **Stale**: after 15 minutes without an update, the worker fades and its desk shows `stale Nm`. After 4× that time (1 hour by default), it walks out. Change the time limit with the **Stale after (minutes)** setting.
 - **File deleted**: the worker quietly walks out.
 
-The folder is checked every 5 seconds. Only files that changed since the last check are re-read. The mod skips a file without crashing if it is malformed, unreadable, bigger than 64 KB, hidden (starts with `.`), or not `.json`. It shows at most 40 external workers.
+The folder is checked every 5 seconds. Only files that changed since the last check are re-read. The mod skips a file without crashing if it is malformed, unreadable, bigger than 64 KB, hidden (starts with `.`), not `.json`, or has a malformed `scope`. It shows at most 40 external workers.
 
 ### Example writer
 
@@ -162,6 +173,13 @@ The folder is checked every 5 seconds. Only files that changed since the last ch
 ```bash
 bash examples/office-worker.sh nightly-backup blocked "Copying photos" "Disk is full, free some space"
 bash examples/office-worker.sh nightly-backup done "Copying photos"
+bash examples/office-worker.sh nightly-backup working "Copying photos" "" ~/projects/photos   # only shown inside that folder
+```
+
+The scope can also come from the `OFFICE_SPACE_SCOPE` environment variable. Usage line, for reference:
+
+```
+office-worker.sh <id> <status> "<task>" ["<note>"] ["<scope>"]
 ```
 
 To report from another machine, sync or mount its status folder into the workers folder (for example with `rsync` or a shared drive). [`examples/demo.sh`](examples/demo.sh) stages four workers for about a minute.

@@ -29,6 +29,7 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 | `/office-space` | Open or close the Office Space panel |
 | `/office-space-band` | Show or hide the small office strip above the prompt |
 | `/office-space-help` | List every Office Space command and setting |
+| `/office-space-update` | Check GitHub for a newer version and update to it (see [Updating](#updating)) |
 
 Type `/office-space` in the prompt and the menu lists all of them. The older `/office-space band` still works.
 
@@ -40,6 +41,7 @@ The settings are optional and have defaults. Change them in `/plugin` → office
 | --- | --- | --- |
 | `workersDir` (External workers folder) | `~/.claude/office-space/workers` | Folder of worker JSON files to show |
 | `staleMinutes` (Stale after) | `15` | Minutes without an update before an external worker fades. After 4× that time it leaves |
+| `checkForUpdates` (Check for updates daily) | off | Once a day at session start, ask GitHub for the newest version and show one toast if there is one. Off by default |
 
 ### Environment variable
 
@@ -52,6 +54,26 @@ The settings are optional and have defaults. Change them in `/plugin` → office
 
 More commands (customize the Boss, your team and the office) are planned — see the [roadmap issues](https://github.com/rbrtcnkln1/office-space/issues).
 
+## Updating
+
+New versions reach you when the `version` in `.claude-plugin/plugin.json` is bumped on `main`; a change without a bump is not delivered to installed copies.
+
+**Update now.** Any one of these, then run `/reload-plugins`:
+
+- `/office-space-update` inside Claude Code. It reads your installed version, asks GitHub for the latest, and runs `claude plugin update office-space@office-space` for you if there is a newer one. It does nothing if you are already current, and it tells you the manual steps if it is offline or `claude` on your PATH is missing or older than 2.1.290.
+- `/plugin` → Marketplaces → office-space → Update
+- `claude plugin update office-space` in a terminal
+
+**Update automatically.** Third-party marketplaces do not auto-update by default (only Anthropic's own do), so turn it on once:
+
+1. Type `/plugin` and open the Marketplaces tab.
+2. Choose `office-space`.
+3. Choose **Enable auto-update**. The screen then reads "Auto-update enabled".
+
+Claude Code then refreshes the marketplace and updates its installed plugins on startup. Run `/reload-plugins` (or restart) to load a new version in a session that was already open. You can turn it off from the same screen (**Disable auto-update**).
+
+**Privacy.** `/office-space-update` makes one request to `raw.githubusercontent.com/rbrtcnkln1/office-space` (the public `plugin.json`) and nothing else. Office Space makes no other network requests unless you turn on the `checkForUpdates` setting, which repeats that one request at most once a day.
+
 ## Requirements
 
 A Claude Code version that supports plugin hook modules (2.1.29x or newer); older versions reject the plugin. It works in the terminal and in the desktop app's Code tab.
@@ -60,7 +82,7 @@ A Claude Code version that supports plugin hook modules (2.1.29x or newer); olde
 
 **Does it use my context or tokens?** No. It only draws UI: no skills, agents or prompt text, so it adds nothing to Claude's context.
 
-**How do I update?** Run `/plugin` → Marketplaces → office-space → Update, or `claude plugin update office-space` in a terminal. New versions arrive whenever the version in `plugin.json` is bumped here.
+**How do I update?** Type `/office-space-update`, or see [Updating](#updating) for the manual and automatic options.
 
 **How do I uninstall?** `/plugin uninstall office-space`.
 

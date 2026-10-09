@@ -2,10 +2,14 @@
 
 Every release bumps `version` in `.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
-## Unreleased
-- `/office-space-update` checks GitHub for a newer version and updates through `claude plugin update`; copies read from a local folder get a pull hint instead.
-- New setting `checkForUpdates` (off by default): one toast per day when a newer version exists.
+## 0.8.1 — 2026-10-08
+Updating and feedback.
+- `/office-space-update` checks GitHub for a newer version and updates through `claude plugin update`; if that is not possible it prints the manual steps, and copies read from a local folder get a pull hint instead.
+- New setting `checkForUpdates` (off by default): at most one toast per day when a newer version exists.
 - README: an Updating section, including how to turn on marketplace auto-update.
+- `/office-space-feedback` shows the issue link plus your Office Space and Claude Code versions to paste in. Nothing is sent anywhere.
+- GitHub issue forms for bug reports and ideas.
+- Clearer install steps for the terminal and the desktop app.
 
 ## 0.8.0 — 2026-10-08
 Real slash commands.

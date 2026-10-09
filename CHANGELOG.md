@@ -2,8 +2,8 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
-## Unreleased
-- Fix: the first `/office-space` in a new chat no longer says "closed for the day" instead of opening. The toggle remembered the panel as open from the previous chat; it now asks the app which panels are actually showing in this session (`$.ui.panes()`), so the command opens a panel that is not there and closes one that is, including after the panel's close mark. The panel is no longer saved across sessions (the band setting still is).
+## 0.9.1 — 2026-10-09
+- Fix: `/office-space` now opens on the first try in a new chat; the panel's open state is no longer carried over between chats. The toggle asks the app which panels are actually showing in this session (`$.ui.panes()`), so it opens a panel that is not there and closes one that is, including after the panel's close mark. The band setting is still saved.
 
 ## 0.9.0 — 2026-10-09
 Per-project external workers, plus a remote annex, alerts and notes.

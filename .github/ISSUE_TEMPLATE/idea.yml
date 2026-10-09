@@ -1,6 +1,7 @@
 name: I have an idea
 description: Suggest something new or better
-labels: [enhancement]
+title: "[Idea]: "
+labels: [idea, feedback]
 body:
   - type: markdown
     attributes:

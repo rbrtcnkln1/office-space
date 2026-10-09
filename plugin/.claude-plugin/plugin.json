@@ -1,6 +1,6 @@
 {
   "name": "office-space",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Subagents as 16-bit office workers above the prompt, plus external workers from a watched folder. Toggle with /office-space.",
   "author": {
     "name": "Robert Conklin",

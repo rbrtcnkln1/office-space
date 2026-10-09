@@ -2,13 +2,12 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
-## Unreleased
-No version bump.
-- Smaller install: only the files the mod needs are downloaded (~130 KB instead of ~1.6 MB). The plugin now lives in `plugin/`; the marketplace stays at the repo root.
-- Update check reads `plugin/.claude-plugin/plugin.json`; local-clone detection looks one level up for `.git`.
-- README animations (GIFs rendered from the real office).
-- Promo script and storyboard.
-- Reproducible media generator in `scripts/media/`.
+## 0.8.2 — 2026-10-08
+Smaller install.
+- The install is about 120 KB instead of about 1.6 MB: the runtime now lives in `plugin/` and installs skip media, docs and tests.
+- README animations (GIFs rendered from the real office), a promo script and storyboard, and a reproducible media generator in `scripts/media/`.
+- GitHub issue forms now label submissions as idea/bug plus feedback.
+- Copies older than 0.8.2 keep their update check working: a small version pointer stays at `.claude-plugin/plugin.json` in the repo root.
 
 ## 0.8.1 — 2026-10-08
 Updating and feedback.

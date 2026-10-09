@@ -9,6 +9,13 @@
 # repo root and are staged next to a copy of plugin/ in a scratch folder here.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
+# The root stub is what copies older than 0.8.2 read for their update check.
+v_plugin="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$root/plugin/.claude-plugin/plugin.json" | head -1)"
+v_stub="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$root/.claude-plugin/plugin.json" | head -1)"
+if [ "$v_plugin" != "$v_stub" ]; then
+  echo "Version mismatch: plugin/.claude-plugin/plugin.json is $v_plugin but the root stub .claude-plugin/plugin.json is $v_stub. Bump both." >&2
+  exit 1
+fi
 stage="$(mktemp -d "${TMPDIR:-/tmp}/office-space-test.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 cp -R "$root/plugin/." "$stage/"

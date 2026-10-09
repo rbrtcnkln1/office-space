@@ -23,5 +23,5 @@ Issues and pull requests are welcome.
 - **Generic.** No references to any company, product, machine, account or private workflow.
 - **Never crash the session.** Every file, store or agent read tolerates missing and malformed data.
 - **Tests with behaviour.** New behaviour gets a test in `tests/` (run with `bash scripts/test.sh`; see CLAUDE.md for why tests sit outside `plugin/`).
-- **Releases** bump `version` in `plugin/.claude-plugin/plugin.json` and add a `CHANGELOG.md` entry.
+- **Releases** bump the version in `plugin/.claude-plugin/plugin.json` AND the root stub `.claude-plugin/plugin.json`, and add a `CHANGELOG.md` entry.
 - **Issues** use the forms in `.github/ISSUE_TEMPLATE/` (bug report and idea); `/office-space-feedback` points people to them.

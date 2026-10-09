@@ -7,7 +7,7 @@ Open-source (MIT) Claude Code mod: subagents drawn as 16-bit office workers. Pub
 - **Zero context cost.** Hooks that draw UI only. Do not add skills, agents, MCP servers, `prompt.compose` sections or tool descriptions without an explicit decision; that is what keeps the mod free to run.
 - **Install stays lean:** only runtime files live in `plugin/`; media/docs/tests/tools stay outside it. Everything under `plugin/` is downloaded by every user.
 - **Never crash the host.** All reads (`$.agent`, `$.fs`, `$.store`) tolerate failure and malformed data.
-- **Releases:** bump `version` in `plugin/.claude-plugin/plugin.json` (installed copies only update on a bump), add a CHANGELOG entry, tag `vX.Y.Z`.
+- **Releases:** bump the version in `plugin/.claude-plugin/plugin.json` AND the root stub `.claude-plugin/plugin.json` (old copies read the stub for update checks; test.sh enforces they match) (installed copies only update on a bump), add a CHANGELOG entry, tag `vX.Y.Z`.
 - Load the `plugin-authoring` skill before editing hooks.
 
 ## Layout

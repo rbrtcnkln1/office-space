@@ -285,3 +285,26 @@ describe('worker scope', () => {
     expect(inScope(['/tmp/link'], '/private/real', undefined, real)).toBe(true)
   })
 })
+
+test('scoped workers show only in their folder; unscoped and malformed behave as before', async ($, on) => {
+  mock.clock(on)
+  const now = new Date().toISOString()
+  const files: Record<string, string> = {
+    'here.json': JSON.stringify({ status: 'working', task: 'Inside job', updated: now, scope: '~/proj' }),
+    'there.json': JSON.stringify({ status: 'working', task: 'Elsewhere job', updated: now, scope: ['/srv/other'] }),
+    'bad.json': JSON.stringify({ status: 'working', task: 'Bad scope job', updated: now, scope: 'relative' }),
+    'free.json': JSON.stringify({ status: 'working', task: 'Free job', updated: now }),
+  }
+  on('env.get', async (_$: any, e: any) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }) as never)
+  on('session.cwd', async () => ({ value: '/home/me/proj/sub' }) as never)
+  on('agent.list', async () => ({ value: [] }) as never)
+  on('fs.list', async () => ({ value: Object.keys(files).map((name, i) => ({ name, kind: 'file', size: 100, mtimeMs: i + 1, isLink: false })) }) as never)
+  on('fs.read', async (_$: any, e: any) => ({ value: files[String(e.path).split('/').pop() as string] }) as never)
+  await $.command.run({ command: 'office-space', args: 'band' } as never)
+  const term = await $.ui.mount({ plugin: 'office-space', surface: 'terminal', ...BAND } as never)
+  expect(await term.find({ type: 'Text', text: /Inside job/ })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: /Free job/ })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: /Elsewhere job/ })).toBeUndefined()
+  expect(await term.find({ type: 'Text', text: /Bad scope job/ })).toBeUndefined()
+  await term.unmount()
+})

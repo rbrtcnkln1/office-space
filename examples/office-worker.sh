@@ -41,7 +41,7 @@ else
   printf '{"id":"%s","status":"%s","task":"%s","note":"%s","source":"%s","updated":"%s"}\n' \
     "$(esc "$id")" "$(esc "$status")" "$(esc "$task")" "$(esc "$note")" "$(esc "$source_label")" "$now" > "$tmp"
   if [ -n "$scope" ]; then
-    sed -e "s|}\$|,\"scope\":\"$(esc "$scope" | sed -e 's/[|&]/\\&/g')\"}|" "$tmp" > "$tmp.s" && mv -f "$tmp.s" "$tmp"
+    sed -e "s|}\$|,\"scope\":\"$(esc "$scope" | sed -e 's/[\\|&]/\\&/g')\"}|" "$tmp" > "$tmp.s" && mv -f "$tmp.s" "$tmp"
   fi
 fi
 mv -f "$tmp" "$dir/$id.json"

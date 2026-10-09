@@ -135,8 +135,11 @@ async function realOf($: EngineInterface, p: string): Promise<string> {
  * Only the workers meant for this session's working folder. Unscoped workers
  * always show; scoped ones need a known cwd (fail closed when it is missing).
  */
+let visibleMemo: { src: ExternalWorker[]; out: ExternalWorker[] } | null = null
 async function visibleHere($: EngineInterface, all: ExternalWorker[]): Promise<ExternalWorker[]> {
   if (!all.some(w => w.scope)) return all
+  // poll runs about once a second; the list only changes on a folder refresh (every 5 s), so reuse the answer.
+  if (visibleMemo && visibleMemo.src === all) return visibleMemo.out
   let cwd: string | undefined
   let home: string | undefined
   try { cwd = await $.session.cwd() } catch {}
@@ -147,7 +150,9 @@ async function visibleHere($: EngineInterface, all: ExternalWorker[]): Promise<E
     for (const w of all) for (const s of w.scope ?? []) paths.add(normalizePath(s, home))
     for (const p of paths) real.set(p, await realOf($, p))
   }
-  return all.filter(w => inScope(w.scope, cwd, home, p => real.get(p) ?? p))
+  const out = all.filter(w => inScope(w.scope, cwd, home, p => real.get(p) ?? p))
+  visibleMemo = { src: all, out }
+  return out
 }
 
 async function poll($: EngineInterface): Promise<void> {

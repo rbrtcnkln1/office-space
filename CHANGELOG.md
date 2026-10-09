@@ -2,6 +2,12 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## 0.9.0 — 2026-10-09
+Per-project external workers.
+- New optional worker field `scope` (a folder path or an array of them, `~` allowed). A scoped worker shows only in sessions whose working folder is that folder or inside it; unscoped workers show everywhere as before. Paths are compared as real paths on a folder boundary.
+- A malformed `scope` skips the worker. If the session's working folder is unavailable, scoped workers are hidden.
+- `examples/office-worker.sh` takes an optional scope argument or `OFFICE_SPACE_SCOPE`.
+
 ## 0.8.2 — 2026-10-08
 Smaller install.
 - The install is about 120 KB instead of about 1.6 MB: the runtime now lives in `plugin/` and installs skip media, docs and tests.

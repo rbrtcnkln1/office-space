@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { expandDir, isWorkerFile, parseWorker, sanitize, toAgents } from '../hooks/external'
+import { expandDir, inScope, isWorkerFile, normalizePath, parseScope, parseWorker, sanitize, toAgents } from '../hooks/external'
 import type { ExternalWorker } from '../hooks/external'
 
 const MIN = 60_000
@@ -238,5 +238,73 @@ test('symlinked worker files are ignored', async ($, on) => {
   const term = await $.ui.mount({ plugin: 'office-space', surface: 'terminal', ...BAND } as never)
   expect(await term.find({ type: 'Text', text: /Genuine/ })).toBeDefined()
   expect(await term.find({ type: 'Text', text: /Linked/ })).toBeUndefined()
+  await term.unmount()
+})
+
+describe('worker scope', () => {
+  const HOME = '/home/pat'
+  test('parseScope accepts a string or array, rejects malformed', async () => {
+    expect(parseScope(undefined)).toBeUndefined()
+    expect(parseScope('/a/b')).toEqual(['/a/b'])
+    expect(parseScope(['~/x', ' /y '])).toEqual(['~/x', '/y'])
+    for (const bad of [null, 5, {}, '', '  ', [], ['relative/path'], ['/ok', 3], 'x/y', Array(17).fill('/a')]) expect(parseScope(bad)).toBeNull()
+  })
+  test('parseWorker carries scope and skips a malformed one', async () => {
+    expect(parseWorker('{"status":"working","scope":["/a","~/b"]}', 'w.json', NOW)?.scope).toEqual(['/a', '~/b'])
+    expect(parseWorker('{"status":"working"}', 'w.json', NOW)?.scope).toBeUndefined()
+    expect(parseWorker('{"status":"working","scope":"nope"}', 'w.json', NOW)).toBeNull()
+    expect(parseWorker('{"status":"working","scope":[]}', 'w.json', NOW)).toBeNull()
+  })
+  test('no scope is shown everywhere, even without a cwd', async () => {
+    expect(inScope(undefined, '/anything')).toBe(true)
+    expect(inScope(undefined, undefined)).toBe(true)
+  })
+  test('equal or inside matches, on a segment boundary', async () => {
+    expect(inScope(['/a/b'], '/a/b')).toBe(true)
+    expect(inScope(['/a/b'], '/a/b/c/d')).toBe(true)
+    expect(inScope(['/a/b/'], '/a/b/c')).toBe(true)
+    expect(inScope(['/a/b'], '/a/bc')).toBe(false)
+    expect(inScope(['/a/b'], '/a')).toBe(false)
+    expect(inScope(['/a/b'], '/a/b/../c')).toBe(false)
+  })
+  test('~ expands to home; arrays match any entry', async () => {
+    expect(inScope(['~/proj'], `${HOME}/proj/sub`, HOME)).toBe(true)
+    expect(inScope(['~/proj'], `${HOME}/other`, HOME)).toBe(false)
+    expect(inScope(['/x', '~/proj'], `${HOME}/proj`, HOME)).toBe(true)
+    expect(normalizePath('~', HOME)).toBe(HOME)
+  })
+  test('fails closed with no cwd, a relative cwd or no home for ~', async () => {
+    expect(inScope(['/a'], undefined)).toBe(false)
+    expect(inScope(['/a'], '')).toBe(false)
+    expect(inScope(['/a'], 'a')).toBe(false)
+    expect(inScope(['~/a'], '/home/pat/a')).toBe(false)
+  })
+  test('compares through the real-path mapper', async () => {
+    const real = (p: string) => (p === '/tmp/link' ? '/private/real' : p)
+    expect(inScope(['/private/real'], '/tmp/link/sub', undefined, real)).toBe(false) // only the exact folder is mapped
+    expect(inScope(['/tmp/link'], '/private/real', undefined, real)).toBe(true)
+  })
+})
+
+test('scoped workers show only in their folder; unscoped and malformed behave as before', async ($, on) => {
+  mock.clock(on)
+  const now = new Date().toISOString()
+  const files: Record<string, string> = {
+    'here.json': JSON.stringify({ status: 'working', task: 'Inside job', updated: now, scope: '~/proj' }),
+    'there.json': JSON.stringify({ status: 'working', task: 'Elsewhere job', updated: now, scope: ['/srv/other'] }),
+    'bad.json': JSON.stringify({ status: 'working', task: 'Bad scope job', updated: now, scope: 'relative' }),
+    'free.json': JSON.stringify({ status: 'working', task: 'Free job', updated: now }),
+  }
+  on('env.get', async (_$: any, e: any) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }) as never)
+  on('session.cwd', async () => ({ value: '/home/me/proj/sub' }) as never)
+  on('agent.list', async () => ({ value: [] }) as never)
+  on('fs.list', async () => ({ value: Object.keys(files).map((name, i) => ({ name, kind: 'file', size: 100, mtimeMs: i + 1, isLink: false })) }) as never)
+  on('fs.read', async (_$: any, e: any) => ({ value: files[String(e.path).split('/').pop() as string] }) as never)
+  await $.command.run({ command: 'office-space', args: 'band' } as never)
+  const term = await $.ui.mount({ plugin: 'office-space', surface: 'terminal', ...BAND } as never)
+  expect(await term.find({ type: 'Text', text: /Inside job/ })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: /Free job/ })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: /Elsewhere job/ })).toBeUndefined()
+  expect(await term.find({ type: 'Text', text: /Bad scope job/ })).toBeUndefined()
   await term.unmount()
 })

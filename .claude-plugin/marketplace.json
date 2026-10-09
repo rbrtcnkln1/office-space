@@ -1,0 +1,12 @@
+{
+  "name": "office-space",
+  "owner": { "name": "Robert Conklin", "url": "https://github.com/rbrtcnkln1" },
+  "metadata": { "description": "Office Space: your Claude Code agents as a tiny 16-bit office." },
+  "plugins": [
+    {
+      "name": "office-space",
+      "source": "./",
+      "description": "Subagents (and work running elsewhere) as 16-bit office workers. Toggle with /office-space."
+    }
+  ]
+}

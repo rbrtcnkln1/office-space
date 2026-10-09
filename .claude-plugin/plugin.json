@@ -3,8 +3,19 @@
   "version": "0.7.0",
   "description": "Subagents as 16-bit office workers above the prompt, plus external workers from a watched folder. Toggle with /office-space.",
   "author": {
-    "name": "Robert Conklin"
+    "name": "Robert Conklin",
+    "url": "https://github.com/rbrtcnkln1"
   },
+  "homepage": "https://github.com/rbrtcnkln1/office-space",
+  "repository": "https://github.com/rbrtcnkln1/office-space",
+  "license": "MIT",
+  "keywords": [
+    "subagents",
+    "pixel-art",
+    "ui",
+    "pane",
+    "fun"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "workersDir": {

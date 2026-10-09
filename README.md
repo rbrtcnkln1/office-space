@@ -7,6 +7,18 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 /office-space band   show or hide the small version above the prompt
 ```
 
+It only draws UI: no skills, agents or prompt text, so it adds nothing to Claude's context.
+
+## Install
+
+In Claude Code:
+
+```
+/plugin install office-space --marketplace rbrtcnkln1/office-space
+```
+
+Then type `/office-space`. To update, run `/plugin` → Marketplaces → office-space → Update (or `claude plugin update office-space` in a terminal); new versions arrive whenever the version in `plugin.json` is bumped here.
+
 ## External workers
 
 Work running **outside** the session can show up in the office too: a job on another machine, another CLI, a cron job. Any script can join by writing a small JSON file. The mod only ever reads these files.
@@ -68,7 +80,13 @@ This script doesn't escape its arguments, so a task containing `"` writes an inv
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md). Quick checks:
+
 ```bash
 claude plugin validate .
 claude plugin test .
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).

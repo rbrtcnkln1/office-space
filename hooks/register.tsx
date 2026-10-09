@@ -15,6 +15,7 @@ import { atom, read, update } from 'claude-code'
 import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 
 import { FLOOR, Office, SCALE } from './office'
+import { ROLES } from './sprites'
 import type { AgentLike } from './office'
 import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, expandDir, isWorkerFile, parseWorker, toAgents } from './external'
 import type { ExternalWorker } from './external'
@@ -75,7 +76,7 @@ async function refreshExternal($: EngineInterface): Promise<void> {
       resolvedDir = expandDir(env || workersDir, await $.env.get('HOME'))
     }
     const entries = (await $.fs.list(resolvedDir))
-      .filter(ent => ent.kind === 'file' && isWorkerFile(ent.name))
+      .filter(ent => ent.kind === 'file' && !ent.isLink && isWorkerFile(ent.name))
       .sort((a, b) => b.mtimeMs - a.mtimeMs)
       .slice(0, MAX_FILES)
     const names = new Set<string>()
@@ -91,7 +92,7 @@ async function refreshExternal($: EngineInterface): Promise<void> {
       if (ent.size <= MAX_FILE_BYTES) {
         try {
           const text = await $.fs.read(`${resolvedDir}/${ent.name}`)
-          worker = typeof text === 'string' ? parseWorker(text, ent.name, ent.mtimeMs) : null
+          worker = typeof text === 'string' && text.length <= MAX_FILE_BYTES ? parseWorker(text, ent.name, ent.mtimeMs) : null
         } catch {}
       }
       fileCache.set(ent.name, { mtimeMs: ent.mtimeMs, size: ent.size, worker })
@@ -133,7 +134,11 @@ function eotdKey(): string {
 async function loadEotd($: EngineInterface) {
   try {
     const saved = (await $.store.get(eotdKey())) as Record<string, number> | undefined
-    if (saved) for (const [k, v] of Object.entries(saved)) office.eotd.set(k as never, v)
+    if (saved && typeof saved === 'object') {
+      for (const [k, v] of Object.entries(saved)) {
+        if (Object.prototype.hasOwnProperty.call(ROLES, k) && typeof v === 'number' && Number.isFinite(v) && v >= 0) office.eotd.set(k as never, v)
+      }
+    }
   } catch {}
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { expandDir, isWorkerFile, parseWorker, toAgents } from '../hooks/external'
+import { expandDir, isWorkerFile, parseWorker, sanitize, toAgents } from '../hooks/external'
 import type { ExternalWorker } from '../hooks/external'
 
 const MIN = 60_000
@@ -100,6 +100,31 @@ describe('toAgents', () => {
   })
 })
 
+describe('sanitize', () => {
+  test('replaces control, bidi, zero-width and invalid characters with a space', async () => {
+    expect(sanitize('a\u009bb')).toBe('a b')
+    expect(sanitize('gpj\u202Efdp.exe')).toBe('gpj fdp.exe')
+    expect(sanitize('a\u200Bb\u2066c\uFEFFd')).toBe('a b c d')
+    expect(sanitize('a\uFFFFb\uFFFEc')).toBe('a b c')
+    expect(sanitize('a\ud800b')).toBe('a b')
+    expect(sanitize('a\udc00')).toBe('a')
+    expect(sanitize('  a \u0000\u0007  b\x7f ')).toBe('a b')
+  })
+  test('normal text, accents and emoji are unchanged', async () => {
+    for (const t of ['Fix the login flow', 'Café résumé naïve', 'Ship it \u{1F680} now', '日本語のタスク']) expect(sanitize(t)).toBe(t)
+  })
+})
+
+test('a future updated time falls back to the file time and the worker leaves on schedule', async () => {
+  const w = parseWorker(JSON.stringify({ status: 'working', updated: '2999-01-01T00:00:00Z' }), 'f.json', Date.now() - 20 * MIN)
+  expect(w).not.toBeNull()
+  expect(w!.updated).toBeLessThan(Date.now() - 19 * MIN)
+  expect(toAgents([w!], Date.now())[0]?.remote?.stale).toBe(true)
+  expect(toAgents([w!], Date.now() + 90 * MIN)).toEqual([])
+  expect(parseWorker('{"status":"working","updated":"2999-01-01T00:00:00Z"}', 'f.json')).toBeNull()
+  expect(toAgents([worker({ updated: NOW + 6 * MIN })], NOW)).toEqual([])
+})
+
 test('expandDir and isWorkerFile', async () => {
   expect(expandDir('~/.claude/office-space/workers/', '/home/me')).toBe('/home/me/.claude/office-space/workers')
   expect(expandDir('', '/home/me')).toBe('/home/me/.claude/office-space/workers')
@@ -175,5 +200,43 @@ test('OFFICE_SPACE_WORKERS_DIR overrides the folder', async ($, on) => {
   await $.command.run({ command: 'office-space', args: 'band' } as never)
   const term = await $.ui.mount({ plugin: 'office-space', surface: 'terminal', ...BAND } as never)
   expect(await term.find({ type: 'Text', text: /\[remote\] Elsewhere/ })).toBeDefined()
+  await term.unmount()
+})
+
+const BAD = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u200b-\u200f\uffff]/
+
+test('control characters in worker files and subagent text never stop the office drawing', async ($, on) => {
+  mock.clock(on)
+  const now = new Date().toISOString()
+  on('env.get', async (_$: any, e: any) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }) as never)
+  on('agent.list', async () => ({ value: [{ id: 'a1', name: 'Zed\u009b', description: 'Fix\u009b the \u202Ebug\uffff', type: 'general-purpose', status: 'running' }] }) as never)
+  on('fs.list', async () => ({ value: [{ name: 'w.json', kind: 'file', size: 100, mtimeMs: 1, isLink: false }] }) as never)
+  on('fs.read', async () => ({ value: JSON.stringify({ status: 'working', task: 'Copy\u009b files', updated: now }) }) as never)
+  await $.command.run({ command: 'office-space', args: 'band' } as never)
+  const term = await $.ui.mount({ plugin: 'office-space', surface: 'terminal', ...BAND } as never)
+  expect(await term.find({ type: 'Text', text: /\[remote\] Copy files/ })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: /Fix the bug/ })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: BAD })).toBeUndefined()
+  await term.unmount()
+  const desk = await $.ui.mount({ plugin: 'office-space', surface: 'desktop', ...BAND } as never)
+  const svg: any = await desk.find({ type: 'Svg' } as never)
+  expect(svg).toBeDefined()
+  expect(BAD.test(JSON.stringify(svg.props ?? {}).replace(/\\u[0-9a-f]{4}/gi, m => String.fromCharCode(parseInt(m.slice(2), 16))))).toBe(false)
+  await desk.unmount()
+})
+
+test('symlinked worker files are ignored', async ($, on) => {
+  mock.clock(on)
+  on('env.get', async (_$: any, e: any) => ({ value: e.name === 'HOME' ? '/home/me' : undefined }) as never)
+  on('agent.list', async () => ({ value: [] }) as never)
+  on('fs.list', async () => ({ value: [
+    { name: 'link.json', kind: 'file', size: 50, mtimeMs: 2, isLink: true },
+    { name: 'real.json', kind: 'file', size: 50, mtimeMs: 1, isLink: false },
+  ] }) as never)
+  on('fs.read', async (_$: any, e: any) => ({ value: JSON.stringify({ status: 'working', task: String(e.path).endsWith('link.json') ? 'Linked' : 'Genuine', updated: new Date().toISOString() }) }) as never)
+  await $.command.run({ command: 'office-space', args: 'band' } as never)
+  const term = await $.ui.mount({ plugin: 'office-space', surface: 'terminal', ...BAND } as never)
+  expect(await term.find({ type: 'Text', text: /Genuine/ })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: /Linked/ })).toBeUndefined()
   await term.unmount()
 })

@@ -2,21 +2,22 @@
 # A 60-second Office Space demo: four fake workers walk through
 # working -> waiting/blocked -> done/failed, then the demo cleans up.
 # Open the office first (/office-space in Claude Code), then run:  bash examples/demo.sh
-# It only touches files named demo-*.json in the workers folder.
+# It only touches its own four files (demo-build, demo-backup, demo-report, demo-deploy .json).
 dir="${OFFICE_SPACE_WORKERS_DIR:-$HOME/.claude/office-space/workers}"
 mkdir -p "$dir"
 
-cleanup() { rm -f "$dir"/demo-*.json "$dir"/.demo-*.tmp; }
+cleanup() { rm -f "$dir/demo-build.json" "$dir/demo-backup.json" "$dir/demo-report.json" "$dir/demo-deploy.json" "$dir"/.office-demo.*; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 # put <id> <name> <status> <task> <source> [note]
 put() {
-  local now tmp="$dir/.$1.tmp"
+  local now tmp
+  tmp="$(mktemp "$dir/.office-demo.XXXXXX")"
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf '{"id":"%s","name":"%s","status":"%s","task":"%s","source":"%s","note":"%s","updated":"%s"}\n' \
     "$1" "$2" "$3" "$4" "$5" "${6:-}" "$now" > "$tmp"
-  mv "$tmp" "$dir/$1.json"
+  mv -f "$tmp" "$dir/$1.json"
 }
 
 echo "Office Space demo writing to: $dir"

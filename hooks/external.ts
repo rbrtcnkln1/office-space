@@ -11,7 +11,7 @@
 //
 // status is one of working | waiting | blocked | done | failed. Only `status`
 // is required; `id` falls back to the file name, `updated` to the file's
-// modification time. The mod only ever reads the directory.
+// modification time (also used when `updated` is more than 5 minutes ahead). The mod only ever reads the directory.
 
 import type { AgentLike, AgentStatus } from './office'
 
@@ -20,6 +20,7 @@ export const DEFAULT_STALE_MINUTES = 15
 export const LEAVE_AFTER_STALE = 4 // a worker this many staleness periods old has gone home
 export const MAX_FILE_BYTES = 64 * 1024
 export const MAX_WORKERS = 40
+export const FUTURE_SKEW_MS = 5 * 60_000
 
 export type ExternalStatus = 'working' | 'waiting' | 'blocked' | 'done' | 'failed'
 const STATUSES: ReadonlySet<string> = new Set(['working', 'waiting', 'blocked', 'done', 'failed'])
@@ -43,8 +44,23 @@ export type RemoteInfo = {
   note?: string
 }
 
+const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\ufff9-\uffff]+/g
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g
+
+/**
+ * Text that is safe to draw anywhere: control characters, zero-width and
+ * bidirectional marks, noncharacters and lone surrogates become spaces, runs
+ * of spaces collapse, the ends are trimmed. Emoji and accents are untouched.
+ */
+export function sanitize(s: string): string {
+  let t = String(s)
+  const wf = (t as { toWellFormed?: () => string }).toWellFormed
+  t = typeof wf === 'function' ? wf.call(t) : t.replace(LONE_SURROGATE, ' ')
+  return t.replace(UNSAFE, ' ').replace(/ {2,}/g, ' ').trim()
+}
+
 const clean = (v: unknown, max: number): string =>
-  typeof v === 'string' || typeof v === 'number' ? String(v).replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max) : ''
+  typeof v === 'string' || typeof v === 'number' ? sanitize(String(v)).slice(0, max).trim() : ''
 
 /**
  * One file's text → a worker, or null when it is not a usable worker file.
@@ -64,7 +80,8 @@ export function parseWorker(text: string, file: string, mtimeMs = 0): ExternalWo
   const id = clean(o.id, 64) || file.replace(/\.json$/i, '')
   if (!id) return null
   const parsed = typeof o.updated === 'string' || typeof o.updated === 'number' ? new Date(o.updated as string | number).getTime() : NaN
-  const updated = Number.isFinite(parsed) ? parsed : mtimeMs
+  // A timestamp more than 5 minutes ahead of this machine's clock cannot keep a worker alive forever: use the file's time.
+  const updated = Number.isFinite(parsed) && parsed <= Date.now() + FUTURE_SKEW_MS ? parsed : mtimeMs
   if (!updated) return null
   const note = clean(o.note, 120)
   return {
@@ -100,6 +117,7 @@ export function toAgents(workers: ExternalWorker[], now: number, staleMinutes = 
   }
   const out: AgentLike[] = []
   for (const w of [...newest.values()].sort((a, b) => b.updated - a.updated)) {
+    if (w.updated > now + FUTURE_SKEW_MS) continue // never let a future time pin a worker to the desk
     const age = Math.max(0, now - w.updated)
     if (age > staleMs * LEAVE_AFTER_STALE) continue
     const need = w.status === 'waiting' || w.status === 'blocked' ? w.status : null

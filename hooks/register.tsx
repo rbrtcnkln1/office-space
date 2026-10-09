@@ -6,6 +6,7 @@
 //   /office-space        open or close the Office Space panel
 //   /office-space-band   show or hide the small version above the prompt
 //   /office-space-help   list every command and setting
+//   /office-space-update check for a newer version and update
 // Each command is one row of COMMANDS below.
 //
 // Work running outside the session appears too: any script can drop one JSON
@@ -21,11 +22,17 @@ import { ROLES } from './sprites'
 import type { AgentLike } from './office'
 import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, expandDir, isWorkerFile, parseWorker, toAgents } from './external'
 import type { ExternalWorker } from './external'
+import { compareVersions, installedVersion, latestVersion, parseVersion, toastText, updateOffice } from './update'
+import type { UpdateIo } from './update'
 
 const open = atom({ plugin: 'office-space', key: 'open' } as const, false)
 const PANE = 'office-space'
 const STORE_PANE = 'pane'
 const STORE_BAND = 'band'
+const STORE_UPDATE_CHECKED = 'updateChecked'
+const DAY_MS = 24 * 60 * 60 * 1000
+const FETCH_TIMEOUT_MS = 8000
+let checkForUpdates = false
 const TICK_MS = 100
 const POLL_EVERY = 10 // ticks between agent-list reads
 const MAX_BAND_PX = 460 // tallest the band version may draw on desktop (about half a laptop window)
@@ -217,7 +224,7 @@ async function setOpen($: EngineInterface, on: boolean) {
 type Reply = { text: string }
 // A row decides what to do; the dispatcher below does it. Rows stay pure because
 // a module may not hand `$` to a function it looks up at run time.
-type Outcome = Reply | { toggle: 'panel' | 'band' }
+type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' }
 type Command = {
   name: string
   description: string
@@ -247,6 +254,35 @@ async function toggleBand($: EngineInterface): Promise<Reply> {
   return { text: bandOn ? 'Office Space band is on.' : 'Office Space band is off.' }
 }
 
+// The I/O the update flow needs, wired to this plugin's `$`. The flow itself
+// (./update.ts) takes it as a parameter so tests can fake it.
+function updateIo($: EngineInterface): UpdateIo {
+  return {
+    root: $.plugin.root,
+    readText: async (path) => { const t = await $.fs.read(path); return typeof t === 'string' ? t : null },
+    exists: (path) => $.fs.exists(path),
+    // HttpInit has no timeout, so race the request against the clock.
+    fetchText: async (url) => {
+      const res = await Promise.race([$.http.fetch(url), $.clock.sleep(FETCH_TIMEOUT_MS).then(() => null)])
+      return res && res.ok ? res.text : null
+    },
+    run: async (argv, timeoutMs) => { const r = await $.process.run([...argv], { timeoutMs }); return { exitCode: r.exitCode, stdout: r.stdout } },
+  }
+}
+
+// Opt-in (setting checkForUpdates): at most once a day, one toast, never a download.
+async function dailyUpdateCheck($: EngineInterface): Promise<void> {
+  try {
+    const last = Number(await $.store.get(STORE_UPDATE_CHECKED))
+    if (Number.isFinite(last) && Date.now() - last < DAY_MS) return
+    await $.store.set(STORE_UPDATE_CHECKED, Date.now())
+    const io = updateIo($)
+    const installed = parseVersion(await installedVersion(io))
+    const latest = parseVersion(await latestVersion(io))
+    if (installed && latest && compareVersions(installed, latest) < 0) $.ui.toast(toastText(latest.join('.')))
+  } catch {}
+}
+
 // Every slash command is one row here. Add a row and it is registered,
 // answered and listed by /office-space-help (and should get a README row too).
 // Names allow only letters, digits, "_" and "-", so the family is spelled
@@ -272,11 +308,17 @@ export const COMMANDS: Command[] = [
     description: 'List every Office Space command and setting',
     run: () => ({ text: helpText() }),
   },
+  {
+    name: 'office-space-update',
+    description: 'Check GitHub for a newer version of Office Space and update it',
+    run: () => ({ action: 'update' }),
+  },
 ]
 
 async function runCommand($: EngineInterface, name: string, args: string): Promise<Reply> {
   const c = COMMANDS.find((x) => x.name === name)
   const out = c ? c.run(args) : { text: 'Unknown command. Type /office-space-help.' }
+  if ('action' in out) return { text: await updateOffice(updateIo($)) }
   if ('toggle' in out) return out.toggle === 'panel' ? togglePanel($) : toggleBand($)
   return out
 }
@@ -287,7 +329,7 @@ export function helpText(): string {
     'Office Space commands:',
     ...lines,
     '',
-    'Settings (/plugin -> office-space -> configure): workersDir, staleMinutes.',
+    'Settings (/plugin -> office-space -> configure): workersDir, staleMinutes, checkForUpdates.',
     'Docs: https://github.com/rbrtcnkln1/office-space#readme',
   ].join('\n')
 }
@@ -297,6 +339,8 @@ export const register: Register = (on, options) => {
   if (typeof opts.workersDir === 'string' && opts.workersDir.trim()) workersDir = opts.workersDir
   const sm = Number(opts.staleMinutes)
   if (Number.isFinite(sm) && sm > 0) staleMinutes = sm
+  const cu = (options as { checkForUpdates?: unknown } | undefined)?.checkForUpdates
+  checkForUpdates = cu === true || cu === 'true'
 
   on('session.start', async ($, e, next) => {
     for (const c of COMMANDS) {
@@ -312,6 +356,7 @@ export const register: Register = (on, options) => {
       bandOn = (await $.store.get(STORE_BAND)) === true
     } catch {}
     if (paneOpen || bandOn) await setOpen($, true)
+    if (checkForUpdates) void dailyUpdateCheck($)
     // Not reopened here: the app restores panels itself, and reopening from
     // code would put the panel back in its default spot.
     return next(e)

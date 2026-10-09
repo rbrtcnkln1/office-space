@@ -2,6 +2,11 @@
 
 Every release bumps `version` in `.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## Unreleased
+- `/office-space-update` checks GitHub for a newer version and updates through `claude plugin update`; copies read from a local folder get a pull hint instead.
+- New setting `checkForUpdates` (off by default): one toast per day when a newer version exists.
+- README: an Updating section, including how to turn on marketplace auto-update.
+
 ## 0.8.0 — 2026-10-08
 Real slash commands.
 - `/office-space-band` and `/office-space-help` now appear in the `/` menu with descriptions.

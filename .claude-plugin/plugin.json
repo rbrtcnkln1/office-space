@@ -31,6 +31,13 @@
       "description": "An external worker not updated for this long is drawn faded; after 4x this long it leaves.",
       "default": 15,
       "required": false
+    },
+    "checkForUpdates": {
+      "type": "boolean",
+      "title": "Check for updates daily",
+      "description": "Once a day at session start, ask GitHub for the newest version and show one toast if there is one. Off by default; Office Space makes no network requests unless this is on or you run /office-space-update.",
+      "default": false,
+      "required": false
     }
   }
 }

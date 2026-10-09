@@ -4,7 +4,7 @@ const text = (r: unknown) => JSON.stringify(r)
 
 // The command table lives in hooks/register.tsx (COMMANDS). The test kit does not
 // list registered commands, so this is the one place a new command is also named.
-const NAMES = ['office-space', 'office-space-band', 'office-space-help']
+const NAMES = ['office-space', 'office-space-band', 'office-space-help', 'office-space-update']
 
 test('every command is registered as its own entry and answers when run', async ($, on) => {
   mock.clock(on)

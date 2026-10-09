@@ -46,6 +46,7 @@ The settings are optional and have defaults. Change them in `/plugin` → office
 | --- | --- | --- |
 | `workersDir` (External workers folder) | `~/.claude/office-space/workers` | Folder of worker JSON files to show |
 | `staleMinutes` (Stale after) | `15` | Minutes without an update before an external worker fades. After 4× that time it leaves |
+| `alertOnBlocked` (Alert when a worker needs you) | on | Show a toast when an external worker becomes waiting or blocked. Once per time it starts needing you, never repeated while it stays that way, and not for workers already waiting when the session starts. Off turns the toast off |
 | `checkForUpdates` (Check for updates daily) | off | Once a day at session start, ask GitHub for the newest version and show one toast if there is one. Off by default |
 
 ### Environment variable
@@ -103,7 +104,7 @@ Each clip is a short loop drawn by the real renderer (sped up a few times so you
 
 ![Workers hand their results to the Boss, one failed job in red, then everyone leaves](docs/media/hand-in.gif)
 
-**Remote crew.** Jobs outside Claude Code sit at desks with a teal badge. Blocked shows a red **!**, waiting a white **?**, and a quiet one fades.
+**Remote crew.** Jobs outside Claude Code sit in their own row of desks, the remote annex, with a teal badge. Blocked shows a red **!**, waiting a white **?**, and a quiet one fades.
 
 ![External workers: one blocked with a red exclamation mark, one waiting with a question mark, one fading as stale](docs/media/remote-crew.gif)
 
@@ -130,7 +131,8 @@ Put one JSON file per worker in the workers folder:
   "task": "Copying photos to the NAS",
   "updated": "2026-10-08T14:03:00Z",
   "source": "cron",
-  "note": "Disk is full, free some space"
+  "note": "Disk is full, free some space",
+  "url": "https://nas.example.com/jobs/backup"
 }
 ```
 
@@ -143,6 +145,7 @@ Put one JSON file per worker in the workers folder:
 | `updated` | no | ISO 8601 time or epoch milliseconds. Defaults to the file's modified time, which is also used if the time is more than 5 minutes in the future |
 | `source` | no | A short label for the desk badge, such as `remote`, `cron` or `laptop`. Defaults to `remote` |
 | `note` | no | What a human needs to do. Shown instead of the task while the worker is waiting or blocked |
+| `url` | no | An `http://` or `https://` address (up to 300 characters) with more detail, such as the job's page. Shown as text, with a copy button, when you press the waiting or blocked worker. Never opened by the mod. Any other kind of address is ignored, and the worker still shows |
 | `scope` | no | A folder path or an array of them, absolute (`~` means your home folder). The worker shows only in sessions whose working folder is that folder or inside it. Without `scope` it shows everywhere. A malformed `scope` skips the worker |
 
 ### Limiting a worker to a project
@@ -155,9 +158,20 @@ The workers folder is global to the machine, so by default every worker shows up
 
 Folders are compared as real paths (symlinks resolved) on a folder boundary, so `/a/b` matches `/a/b` and `/a/b/c` but not `/a/bc`. If the session's working folder cannot be read, only workers without a `scope` are shown.
 
+### The remote annex
+
+External workers never mix with your subagents. They sit in their own row of desks, the **remote annex**, under a teal sign below the main floor. The annex only exists while someone remote is in the office: with no external workers the office looks exactly as before. It adds one spare desk, grows a row at a time as more arrive (as wide as the main floor), and shrinks back after they leave, never moving a desk someone is sitting at.
+
+![The remote annex: external workers in their own desk row under a teal sign, below the local desks](docs/media/remote-annex.png)
+
+### Reading a note and alerts
+
+- **Press a worker that needs you.** Every waiting or blocked worker gets a button under the office (in the panel and in the band, on the desktop and in the terminal). Press it, or in the panel press its number key, to read its `note` and its `url`. Press it again to hide it. A worker with no note shows its task instead.
+- **A toast when one starts needing you.** One toast each time a worker moves into waiting or blocked, even with the office closed. It does not repeat while the worker stays waiting or blocked, and it does not fire for workers that were already waiting when the session started. Turn it off with the **Alert when a worker needs you** setting (`alertOnBlocked`). It is a toast only, with no sound.
+
 ### How workers appear
 
-- **working**: walks in and goes straight to a desk with no briefing from the Boss, since it already has its work. A teal badge on the desk shows its `source`.
+- **working**: walks in and goes straight to a desk in the annex with no briefing from the Boss, since it already has its work. A teal badge on the desk shows its `source`.
 - **waiting**: a white **?** bubble stays over the worker's head, because a person is needed.
 - **blocked**: a red **!** bubble stays over the worker's head. The summary line counts these as "N needs you".
 - **done** or **failed**: hands the result to the Boss (a failed result is red) and walks out.
@@ -176,10 +190,14 @@ bash examples/office-worker.sh nightly-backup done "Copying photos"
 bash examples/office-worker.sh nightly-backup working "Copying photos" "" ~/projects/photos   # only shown inside that folder
 ```
 
-The scope can also come from the `OFFICE_SPACE_SCOPE` environment variable. Usage line, for reference:
+```bash
+bash examples/office-worker.sh deploy waiting "Ship 4.2" "Approve in CI" "" "https://ci.example.com/runs/42"   # note and url, shown when pressed
+```
+
+The scope can also come from the `OFFICE_SPACE_SCOPE` environment variable, and the url from `OFFICE_SPACE_URL`. The script refuses a url that is not `http://` or `https://`. Usage line, for reference:
 
 ```
-office-worker.sh <id> <status> "<task>" ["<note>"] ["<scope>"]
+office-worker.sh <id> <status> "<task>" ["<note>"] ["<scope>"] ["<url>"]
 ```
 
 To report from another machine, sync or mount its status folder into the workers folder (for example with `rsync` or a shared drive). [`examples/demo.sh`](examples/demo.sh) stages four workers for about a minute.

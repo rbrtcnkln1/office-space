@@ -8,13 +8,15 @@
 //   { "id": "nightly-backup", "name": "Backup bot", "status": "working",
 //     "task": "Copying photos to the NAS", "updated": "2026-10-08T14:03:00Z",
 //     "source": "cron", "note": "optional: what a human needs to do",
-//     "scope": "~/projects/backup" }
+//     "scope": "~/projects/backup", "url": "https://example.com/job/42" }
 //
 // status is one of working | waiting | blocked | done | failed. Only `status`
 // is required; `id` falls back to the file name, `updated` to the file's
 // modification time (also used when `updated` is more than 5 minutes ahead).
 // `scope` (optional string or array of absolute folders, `~` allowed) limits the worker to sessions whose
-// working folder is inside one of them; a malformed scope skips the worker. The mod only ever reads the directory.
+// working folder is inside one of them; a malformed scope skips the worker.
+// `url` (optional) is shown, as text to copy, when a waiting/blocked worker is pressed; only http(s) is kept.
+// The mod only ever reads the directory.
 
 import type { AgentLike, AgentStatus } from './office'
 
@@ -37,6 +39,7 @@ export type ExternalWorker = {
   source: string
   note?: string
   scope?: string[] // absolute folders (`~` allowed); absent = shown everywhere
+  url?: string // http(s) only
 }
 
 /** What the office needs to draw a remote worker differently. */
@@ -46,6 +49,7 @@ export type RemoteInfo = {
   stale: boolean
   ageMin: number
   note?: string
+  url?: string
 }
 
 const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\ufff9-\uffff]+/g
@@ -88,6 +92,7 @@ export function parseWorker(text: string, file: string, mtimeMs = 0): ExternalWo
   const updated = Number.isFinite(parsed) && parsed <= Date.now() + FUTURE_SKEW_MS ? parsed : mtimeMs
   if (!updated) return null
   const note = clean(o.note, 120)
+  const url = parseUrl(o.url)
   const scope = parseScope(o.scope)
   if (scope === null) return null // malformed scope: skip the worker rather than show it everywhere
   return {
@@ -98,8 +103,23 @@ export function parseWorker(text: string, file: string, mtimeMs = 0): ExternalWo
     updated,
     source: clean(o.source, 16) || 'remote',
     ...(note ? { note } : {}),
+    ...(url ? { url } : {}),
     ...(scope ? { scope } : {}),
   }
+}
+
+export const MAX_URL_CHARS = 300
+const URL_OK = /^https?:\/\/[^\s/?#\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿￹-￿][^\s\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿￹-￿]*$/i
+
+/**
+ * A worker's `url` field → the address when it is a plain http or https URL
+ * with a host; undefined otherwise (any other scheme, wrong type, spaces,
+ * control characters, too long). The mod only ever shows it as text.
+ */
+export function parseUrl(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined
+  const t = v.trim()
+  return t.length > 0 && t.length <= MAX_URL_CHARS && URL_OK.test(t) ? t : undefined
 }
 
 export const MAX_SCOPES = 16
@@ -195,7 +215,7 @@ export function toAgents(workers: ExternalWorker[], now: number, staleMinutes = 
       description: w.task || w.name,
       type: 'remote',
       status: STATUS_MAP[w.status],
-      remote: { source: w.source, need, stale: age > staleMs, ageMin: Math.floor(age / 60_000), ...(w.note ? { note: w.note } : {}) },
+      remote: { source: w.source, need, stale: age > staleMs, ageMin: Math.floor(age / 60_000), ...(w.note ? { note: w.note } : {}), ...(w.url ? { url: w.url } : {}) },
     })
     if (out.length >= MAX_WORKERS) break
   }
@@ -207,6 +227,36 @@ export function expandDir(dir: string, home: string | undefined): string {
   let d = dir.trim() || DEFAULT_DIR
   if (d === '~' || d.startsWith('~/')) d = (home ?? '') + d.slice(1)
   return d.length > 1 ? d.replace(/\/+$/, '') : d
+}
+
+/**
+ * Which workers just started needing a human. `known` holds the ids already in
+ * a waiting/blocked stint (a stint ends when the worker is no longer waiting or
+ * blocked, goes stale, or is gone). Returns the workers to announce and the
+ * next `known`. With `quiet` (the first look after startup) nobody is
+ * announced, so workers already blocked when the session opens stay silent.
+ */
+export function newlyNeeding(known: ReadonlySet<string>, agents: AgentLike[], quiet: boolean): { fresh: AgentLike[]; known: Set<string> } {
+  const next = new Set<string>()
+  const fresh: AgentLike[] = []
+  for (const a of agents) {
+    if (!a.remote?.need || a.remote.stale) continue
+    next.add(a.id)
+    if (!known.has(a.id) && !quiet) fresh.push(a)
+  }
+  return { fresh, known: next }
+}
+
+/** The one toast for a batch of workers that need you. */
+export function alertText(fresh: AgentLike[]): string {
+  const who = (a: AgentLike) => a.name || a.description
+  const first = fresh[0]
+  if (!first) return ''
+  if (fresh.length === 1) {
+    const why = first.remote?.note || first.description
+    return `Office Space: ${who(first)} is ${first.remote?.need ?? 'waiting'}${why ? ' - ' + why : ''}`.slice(0, 160)
+  }
+  return `Office Space: ${fresh.length} workers need you: ${fresh.slice(0, 3).map(who).join(', ')}${fresh.length > 3 ? ', ...' : ''}`.slice(0, 160)
 }
 
 /** Which directory entries are worker files: *.json, not hidden (temp files from atomic writes). */

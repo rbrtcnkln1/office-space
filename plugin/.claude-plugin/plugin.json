@@ -38,6 +38,13 @@
       "description": "Once a day at session start, ask GitHub for the newest version and show one toast if there is one. Off by default; Office Space makes no network requests unless this is on or you run /office-space-update.",
       "default": false,
       "required": false
+    },
+    "alertOnBlocked": {
+      "type": "boolean",
+      "title": "Alert when a worker needs you",
+      "description": "Show a toast when an external worker becomes waiting or blocked: once each time it starts needing you, never repeated while it stays that way, and not for workers already waiting when the session starts. Works with the office closed.",
+      "default": true,
+      "required": false
     }
   }
 }

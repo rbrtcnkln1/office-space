@@ -2,6 +2,14 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## Unreleased
+Remote annex, alerts and notes for external workers.
+- External workers now sit in their own desk row, the remote annex, under a teal sign below the main floor. The annex appears only while an external worker is in the office (with none, the layout is unchanged), adds one spare desk, grows a row at a time, shrinks back after they leave and never moves a desk someone is sitting at.
+- A toast when an external worker starts needing you (waiting or blocked): once per stint, never repeated while it holds, silent for workers already waiting at startup, and it works with the office closed. New setting `alertOnBlocked` (on by default) turns it off. Toast only, no sound.
+- Press a waiting or blocked external worker (a button under the office in the panel and the band, on the desktop and in the terminal; number keys in the panel) to read its note and its optional `url`.
+- New optional worker field `url`: only `http://` and `https://` addresses are kept, shown as text with a copy button and never opened. `examples/office-worker.sh` takes an optional url argument or `OFFICE_SPACE_URL`.
+- The README animations were drawn before the annex existed; regenerate them with `bash scripts/media/build.sh gifs` to show it.
+
 ## 0.9.0 — 2026-10-09
 Per-project external workers.
 - New optional worker field `scope` (a folder path or an array of them, `~` allowed). A scoped worker shows only in sessions whose working folder is that folder or inside it; unscoped workers show everywhere as before. Paths are compared as real paths on a folder boundary.

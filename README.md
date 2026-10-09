@@ -1,6 +1,6 @@
 # Office Space
 
-![Three subagents walk into the office, get briefed by the Boss, sit at their desks and start typing](docs/media/hire-day.gif)
+![Office Space explainer: subagents walk in and get briefed, work at desks, hand results to the Boss, remote jobs clock in, a red exclamation mark shows a human is needed, then the install command](docs/media/explainer.gif)
 
 A Claude Code mod that draws your session as a tiny 16-bit office. The main chat is **The Boss**. Each subagent walks in, picks up its assignment, sits at a desk and works. When it finishes, it walks back to hand in the result and leaves. Jobs running outside the session (a cron job, another machine) can sit at a desk too: see [External workers](#external-workers).
 
@@ -94,6 +94,10 @@ A Claude Code version that supports plugin hook modules (2.1.29x or newer); olde
 ## See it in action
 
 Each clip is a short loop drawn by the real renderer (sped up a few times so you don't wait). Regenerate them with [`scripts/media`](scripts/media/README.md).
+
+**Hire day.** Subagents come in through the door, get briefed by the Boss, sit at a desk and start typing.
+
+![Three subagents walk into the office, get briefed by the Boss, sit at their desks and start typing](docs/media/hire-day.gif)
 
 **Hand-in.** A finished worker walks back to the Boss with the result, and a failed job goes in red. The Employee of the Day sign updates.
 

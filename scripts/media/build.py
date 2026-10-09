@@ -10,7 +10,7 @@ which teaser.py reuses. Needs rsvg-convert and Pillow.
 """
 import json, os, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
 WIDTH = 800          # every canvas is 800 px wide
 BORDER = "#1b2233"   # monitor frame around the office
@@ -24,6 +24,22 @@ SETTINGS = {
     "hand-in":     {"stride": 2, "fps": 16, "hold": 1.0},
     "remote-crew": {"stride": 2, "fps": 11, "hold": 1.0},
     "break-room":  {"stride": 2, "fps": 18, "hold": 1.0},
+    # README top banner: big phone-readable captions, title and end cards
+    "explainer":   {"stride": 2, "fps": 16, "hold": 0.0, "bar_h": 70, "font": 27},
+}
+
+INK, RED, CREAM = (0x22, 0x30, 0x4a), (0xc0, 0x39, 0x2b), (0xf4, 0xf1, 0xe8)
+
+# card text: (text, y, size, pixel step, fill, red plaque behind?)
+CARDS = {
+    "@title": [("OFFICE SPACE", 0.30, 88, 4, CREAM, False),
+               ("your Claude Code subagents", 0.57, 30, 2, CREAM, True),
+               ("as a 16-bit office", 0.77, 30, 2, CREAM, True)],
+    "@end":   [("Zero context cost", 0.15, 52, 2, CREAM, False),
+               ("just UI", 0.31, 28, 2, CREAM, False),
+               ("/plugin install office-space", 0.51, 28, 2, CREAM, True),
+               ("--marketplace rbrtcnkln1/office-space", 0.69, 28, 2, CREAM, True),
+               ("/office-space to open", 0.88, 28, 2, CREAM, False)],
 }
 
 
@@ -40,18 +56,47 @@ def rasterize(svg, png):
     subprocess.run(["rsvg-convert", svg, "-o", png], check=True)
 
 
-def compose(office_png, caption, out_png, office_h):
+def pixel_text(img, xy, text, size, fill, step):
+    """Hard-edged text: drawn at 1/step size, thresholded, scaled up with nearest."""
+    w, h = img.size
+    f = ImageFont.truetype(FONT_PATHS[0], max(6, size // step), index=1)
+    tmp = Image.new("L", (w // step, h // step), 0)
+    ImageDraw.Draw(tmp).text((xy[0] // step, xy[1] // step), text, font=f, fill=255, anchor="mm")
+    mask = tmp.point(lambda v: 255 if v > 110 else 0).resize((w, h), Image.NEAREST)
+    sh = Image.new("L", (w, h), 0)
+    sh.paste(mask, (step, step))
+    img.paste(Image.new("RGB", (w, h), INK), (0, 0), sh)
+    img.paste(Image.new("RGB", (w, h), fill), (0, 0), mask)
+
+
+def compose_card(office_png, key, out_png, office_h, bar_h):
+    img = Image.open(office_png).convert("RGB")
+    canvas = Image.new("RGB", (WIDTH, office_h + PAD_TOP + bar_h), BORDER)
+    canvas.paste(img, ((WIDTH - img.width) // 2, PAD_TOP))
+    canvas = ImageEnhance.Brightness(canvas).enhance(0.3)
+    d = ImageDraw.Draw(canvas)
+    H = canvas.height
+    for text, fy, size, step, fill, plaque in CARDS[key]:
+        y = int(H * fy)
+        if plaque:
+            half = int(len(text) * size * 0.31) + 18
+            d.rectangle([WIDTH // 2 - half, y - size // 2 - 6, WIDTH // 2 + half, y + size // 2 + 8], fill=RED, outline=INK, width=3)
+        pixel_text(canvas, (WIDTH // 2, y), text, size, fill, step)
+    canvas.save(out_png)
+
+
+def compose(office_png, caption, out_png, office_h, bar_h=BAR_H, fsize=17):
     """Office on a dark frame, caption below. office_h is the tallest frame of
     the scene, so every frame of a GIF has the same size (the office can grow)."""
     img = Image.open(office_png).convert("RGB")
-    canvas = Image.new("RGB", (WIDTH, office_h + PAD_TOP + BAR_H), BORDER)
+    canvas = Image.new("RGB", (WIDTH, office_h + PAD_TOP + bar_h), BORDER)
     canvas.paste(img, ((WIDTH - img.width) // 2, PAD_TOP))
     d = ImageDraw.Draw(canvas)
-    f = font(17)
+    f = font(fsize)
     text = caption
     while d.textlength(text, font=f) > WIDTH - 32 and len(text) > 4:
         text = text[:-2]
-    d.text((WIDTH // 2, office_h + PAD_TOP + BAR_H // 2 + 1), text, font=f, fill="#f2e9d0", anchor="mm")
+    d.text((WIDTH // 2, office_h + PAD_TOP + bar_h // 2 + 1), text, font=f, fill="#f2e9d0", anchor="mm")
     canvas.save(out_png)
 
 
@@ -70,7 +115,10 @@ def build_scene(work, out, name):
 
     def one(i, o, office_h):
         c = os.path.join(png_dir, f"{i:04d}.png")
-        compose(o, captions[i], c, office_h)
+        if captions[i] in CARDS:
+            compose_card(o, captions[i], c, office_h, cfg.get("bar_h", BAR_H))
+        else:
+            compose(o, captions[i], c, office_h, cfg.get("bar_h", BAR_H), cfg.get("font", 17))
         os.remove(o)
         return c
 

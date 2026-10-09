@@ -13,7 +13,7 @@ Needs `bun`, `rsvg-convert`, Python 3 with Pillow, and (for the MP4, macOS only)
 
 | Step | File | What it does |
 | --- | --- | --- |
-| 1 | `frames.ts` | Scripted scenes (`hire-day`, `hand-in`, `remote-crew`, `break-room`). `Math.random` is replaced by a seeded generator before each scene, so the output is byte-for-byte reproducible. One SVG per tick (100 ms) plus a caption list. |
+| 1 | `frames.ts` | Scripted scenes (`explainer`, `hire-day`, `hand-in`, `remote-crew`, `break-room`; `explainer` is the README banner, with `@title`/`@end` cards drawn by `build.py`). `Math.random` is replaced by a seeded generator before each scene, so the output is byte-for-byte reproducible. One SVG per tick (100 ms) plus a caption list. |
 | 2 | `build.py` | `rsvg-convert` at 2x, then each frame is framed on an 800 px canvas with a caption bar. Keeps every second tick (a time-lapse), uses one shared 255-colour palette (no flicker), merges identical frames and loops forever. |
 | 3 | `teaser.py` | Re-rasterizes the same frames at 3 px per logical pixel (still an integer multiple, so the art stays crisp), cuts the shot list from `docs/promo/storyboard.md` to 1280x720 and burns in the captions. |
 | 4 | `encode_mp4.swift` | Encodes the teaser PNGs to a silent H.264 MP4 with AVFoundation. |

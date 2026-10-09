@@ -123,6 +123,48 @@ const scenes: Record<string, () => Scene> = {
     return s
   },
 
+  // e. Explainer: the README's top GIF. Captions starting with "@" are cards
+  //    (title / end) that build.py draws over a darkened office frame.
+  explainer() {
+    const s = new Scene('explainer', 21)
+    const o = s.office as any
+    /** Show a caption for at least `min` ticks; first run until `cond` holds (max `limit`). */
+    const beat = (caption: string, min: number, cond?: () => boolean, limit = 300) => {
+      const start = s.frames.length
+      s.caption = caption
+      if (cond) s.until(cond, limit, caption)
+      const left = min - (s.frames.length - start)
+      if (left > 0) s.run(left, caption)
+    }
+    s.sync()
+    beat('@title', 84)
+    // 2. hire
+    s.add(job('a1', 'Write the login tests'))
+    s.add(job('a2', 'Review the pull request'))
+    s.add(job('a3', 'Research card routing'))
+    beat('Subagents start: they walk in, get briefed', 60, () => [...s.office.workers.values()].every(w => w.seated), 300)
+    // 3. work (+ coffee)
+    o.takeBreak(o.workers.get('a2'), 'station')
+    beat('They sit down and work while you keep chatting', 96)
+    // 4. hand-in
+    s.set('a1', { status: 'completed' })
+    s.run(8, 'Done? They hand the result back to the Boss')
+    s.set('a2', { status: 'failed' })
+    s.run(8)
+    s.set('a3', { status: 'completed' })
+    beat('Done? They hand the result back to the Boss', 70, () => s.office.workers.size === 0, 260)
+    // 5. remote
+    s.add(remote('backup', 'Copy photos to the NAS', 'cron'))
+    s.add(remote('report', 'Weekly report', 'laptop'))
+    s.add(remote('build', 'Nightly build', 'server'))
+    beat('Jobs on other machines can clock in too', 80)
+    // 6. blocked
+    s.set('backup', { status: 'waiting', remote: { need: 'blocked', note: 'Disk is full, free some space' } })
+    beat('Red ! = a human is needed', 80)
+    beat('@end', 110)
+    return s
+  },
+
   // d. Break room: coffee, push-ups, and a bored Boss.
   'break-room'() {
     const s = new Scene('break-room', 9)

@@ -7,6 +7,7 @@
 //   /office-space-band   show or hide the small version above the prompt
 //   /office-space-help   list every command and setting
 //   /office-space-update check for a newer version and update
+//   /office-space-feedback report a bug or share an idea
 // Each command is one row of COMMANDS below.
 //
 // Work running outside the session appears too: any script can drop one JSON
@@ -22,7 +23,7 @@ import { ROLES } from './sprites'
 import type { AgentLike } from './office'
 import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, expandDir, isWorkerFile, parseWorker, toAgents } from './external'
 import type { ExternalWorker } from './external'
-import { compareVersions, installedVersion, latestVersion, parseVersion, toastText, updateOffice } from './update'
+import { compareVersions, feedbackText, installedVersion, latestVersion, parseVersion, toastText, updateOffice } from './update'
 import type { UpdateIo } from './update'
 
 const open = atom({ plugin: 'office-space', key: 'open' } as const, false)
@@ -224,7 +225,7 @@ async function setOpen($: EngineInterface, on: boolean) {
 type Reply = { text: string }
 // A row decides what to do; the dispatcher below does it. Rows stay pure because
 // a module may not hand `$` to a function it looks up at run time.
-type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' }
+type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' }
 type Command = {
   name: string
   description: string
@@ -313,12 +314,27 @@ export const COMMANDS: Command[] = [
     description: 'Check GitHub for a newer version of Office Space and update it',
     run: () => ({ action: 'update' }),
   },
+  {
+    name: 'office-space-feedback',
+    description: 'Report a bug or share an idea (shows the link and your version details)',
+    run: () => ({ action: 'feedback' }),
+  },
 ]
+
+async function feedback($: EngineInterface): Promise<string> {
+  let office: string | null = null
+  let claude: string | null = null
+  let surface: string | null = null
+  try { office = await installedVersion(updateIo($)) } catch {}
+  try { claude = (await $.session.version()).version } catch {}
+  try { const s = await $.session.surfaces(); surface = s.length ? (s.includes('terminal') ? 'terminal' : 'desktop app') : null } catch {}
+  return feedbackText(office, claude, surface)
+}
 
 async function runCommand($: EngineInterface, name: string, args: string): Promise<Reply> {
   const c = COMMANDS.find((x) => x.name === name)
   const out = c ? c.run(args) : { text: 'Unknown command. Type /office-space-help.' }
-  if ('action' in out) return { text: await updateOffice(updateIo($)) }
+  if ('action' in out) return { text: out.action === 'feedback' ? await feedback($) : await updateOffice(updateIo($)) }
   if ('toggle' in out) return out.toggle === 'panel' ? togglePanel($) : toggleBand($)
   return out
 }

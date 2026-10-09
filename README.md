@@ -34,6 +34,7 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 | `/office-space-band` | Show or hide the small office strip above the prompt |
 | `/office-space-help` | List every Office Space command and setting |
 | `/office-space-update` | Check GitHub for a newer version and update to it (see [Updating](#updating)) |
+| `/office-space-feedback` | Shows the link to report a bug or share an idea, plus your version details to paste in |
 
 Type `/office-space` in the prompt and the menu lists all of them. The older `/office-space band` still works.
 
@@ -153,6 +154,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Quick checks:
 claude plugin validate .
 claude plugin test .
 ```
+
+## Feedback and ideas
+
+Found a bug or have an idea? Run `/office-space-feedback` or open an issue: https://github.com/rbrtcnkln1/office-space/issues/new/choose. You'll need a free GitHub account. Nothing is sent automatically.
 
 ## License
 

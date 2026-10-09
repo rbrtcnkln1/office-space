@@ -23,3 +23,4 @@ Issues and pull requests are welcome.
 - **Never crash the session.** Every file, store or agent read tolerates missing and malformed data.
 - **Tests with behaviour.** New behaviour gets a test in `tests/`.
 - **Releases** bump `version` in `.claude-plugin/plugin.json` and add a `CHANGELOG.md` entry.
+- **Issues** use the forms in `.github/ISSUE_TEMPLATE/` (bug report and idea); `/office-space-feedback` points people to them.

@@ -127,3 +127,20 @@ export async function updateOffice(io: UpdateIo): Promise<string> {
     return `Could not check for updates. ${MANUAL}`
   }
 }
+
+export const ISSUES_URL = 'https://github.com/rbrtcnkln1/office-space/issues/new/choose'
+
+// Pure: the message /office-space-feedback prints. Nothing is sent anywhere.
+export function feedbackText(office: string | null, claude: string | null, surface: string | null): string {
+  return [
+    'Thanks for trying Office Space! Found a bug or have an idea?',
+    `Open an issue here (a free GitHub account is needed): ${ISSUES_URL}`,
+    '',
+    'Paste this into the issue so we know your setup:',
+    `  Office Space: ${office ?? 'unknown'}`,
+    `  Claude Code: ${claude ?? 'unknown'}`,
+    `  Where: ${surface ?? 'unknown'}`,
+    '',
+    'Nothing has been sent; this message only shows the details.',
+  ].join('\n')
+}

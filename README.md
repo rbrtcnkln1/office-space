@@ -2,10 +2,6 @@
 
 ![Three subagents walk into the office, get briefed by the Boss, sit at their desks and start typing](docs/media/hire-day.gif)
 
-### ▶ Watch the 37-second teaser
-
-https://github.com/user-attachments/assets/13b7944a-4ba9-4aa3-b2d8-5ad59e323084
-
 A Claude Code mod that draws your session as a tiny 16-bit office. The main chat is **The Boss**. Each subagent walks in, picks up its assignment, sits at a desk and works. When it finishes, it walks back to hand in the result and leaves. Jobs running outside the session (a cron job, another machine) can sit at a desk too: see [External workers](#external-workers).
 
 ## Quick start
@@ -183,3 +179,7 @@ Found a bug or have an idea? Run `/office-space-feedback` or open an issue: http
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Watch the teaser
+
+[![Office Space teaser — click to play (37 s)](docs/media/teaser-thumbnail.png)](https://github.com/rbrtcnkln1/office-space/releases/download/v0.8.1/office-space-teaser.mp4)

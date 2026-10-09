@@ -2,6 +2,12 @@
 
 Every release bumps `version` in `.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## 0.8.0 — 2026-10-08
+Real slash commands.
+- `/office-space-band` and `/office-space-help` now appear in the `/` menu with descriptions.
+- `/office-space band` still works as before.
+- Unknown arguments point to `/office-space-help`.
+
 ## 0.7.2 — 2026-10-08
 Security hardening.
 - Text from worker files and subagent descriptions is cleaned before drawing: control characters, invisible and right-to-left override characters, and invalid characters become spaces, so they can no longer stop the office from drawing or disguise a label.

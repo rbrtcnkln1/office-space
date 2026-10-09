@@ -61,3 +61,33 @@ test('control characters in a description never reach the drawing', async ($, on
   expect(/[\u0000-\u0008]/.test(svg?.props?.source ?? '')).toBe(false)
   await desk.unmount()
 })
+
+// ----- the first /office-space of a chat follows what is on screen -----
+
+function fakePanes(on: any, seed: boolean) {
+  let up = seed
+  on('ui.open', async () => { up = true; return { value: { isPlaced: true } } as never })
+  on('ui.close', async () => { up = false; return { value: undefined } as never })
+  on('ui.panes', async () => ({ value: up ? [{ id: 'office-space', title: 'Office Space', isShown: true, isFocused: false, isPlaced: true }] : [] }) as never)
+  return { drop: () => { up = false } }
+}
+
+const run = async ($: any) => JSON.stringify(await $.command.run({ command: 'office-space', args: '' } as never))
+
+test('the first command in a fresh chat opens (no panel is assumed open from before)', async ($, on) => {
+  mock.clock(on)
+  on('agent.list', async () => ({ value: [] }) as never)
+  fakePanes(on, false)
+  expect(await run($)).toContain('is open')
+})
+
+test('open then command closes; closed with the X then command opens', async ($, on) => {
+  mock.clock(on)
+  on('agent.list', async () => ({ value: [] }) as never)
+  const panes = fakePanes(on, false)
+  expect(await run($)).toContain('is open')
+  expect(await run($)).toContain('closed for the day')
+  expect(await run($)).toContain('is open')
+  panes.drop() // the person pressed the panel's X
+  expect(await run($)).toContain('is open')
+})

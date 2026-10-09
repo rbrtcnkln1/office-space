@@ -1,9 +1,11 @@
 # Changelog
 
-Every release bumps `version` in `.claude-plugin/plugin.json`; that bump is what installed copies update to.
+Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
 ## Unreleased
-Docs and media only, no version bump.
+No version bump.
+- Smaller install: only the files the mod needs are downloaded (~130 KB instead of ~1.6 MB). The plugin now lives in `plugin/`; the marketplace stays at the repo root.
+- Update check reads `plugin/.claude-plugin/plugin.json`; local-clone detection looks one level up for `.git`.
 - README animations (GIFs rendered from the real office).
 - Promo script and storyboard.
 - Reproducible media generator in `scripts/media/`.

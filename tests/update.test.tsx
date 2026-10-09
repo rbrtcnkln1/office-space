@@ -8,7 +8,7 @@ import type { UpdateIo } from '../hooks/update'
 // installed-looking path. These tests fake that parameter and record every call.
 
 const ROOT = '/home/me/.claude/plugins/cache/office-space/office-space/0.8.0'
-const URL = 'https://raw.githubusercontent.com/rbrtcnkln1/office-space/main/.claude-plugin/plugin.json'
+const URL = 'https://raw.githubusercontent.com/rbrtcnkln1/office-space/main/plugin/.claude-plugin/plugin.json'
 const UPDATE_ARGV = ['claude', 'plugin', 'update', 'office-space@office-space']
 const manifest = (v: string) => JSON.stringify({ name: 'office-space', version: v })
 

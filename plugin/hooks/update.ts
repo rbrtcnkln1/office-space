@@ -2,7 +2,7 @@
 // Pure on purpose (no `$`): the command in ./register.tsx does the I/O and
 // hands the results here, which keeps each branch easy to test.
 
-export const LATEST_URL = 'https://raw.githubusercontent.com/rbrtcnkln1/office-space/main/.claude-plugin/plugin.json'
+export const LATEST_URL = 'https://raw.githubusercontent.com/rbrtcnkln1/office-space/main/plugin/.claude-plugin/plugin.json'
 export const UPDATE_ARGV = ['claude', 'plugin', 'update', 'office-space@office-space'] as const
 
 export type Version = [number, number, number]
@@ -106,7 +106,8 @@ export async function latestVersion(io: UpdateIo): Promise<string | null> {
 export async function updateOffice(io: UpdateIo): Promise<string> {
   try {
     let hasGit = false
-    try { hasGit = await io.exists(`${io.root}/.git`) } catch {}
+    // A clone has .git at the repo root, one level above the plugin/ folder.
+    try { hasGit = (await io.exists(`${io.root}/.git`)) || (await io.exists(`${io.root}/../.git`)) } catch {}
     if (looksLikeLocalFolder(io.root, hasGit)) return updateText({ kind: 'local' })
     const installed = (await installedVersion(io)) ?? 'unknown'
     const latest = await latestVersion(io)

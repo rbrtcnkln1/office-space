@@ -61,7 +61,7 @@ More commands (customize the Boss, your team and the office) are planned — see
 
 ## Updating
 
-New versions reach you when the `version` in `.claude-plugin/plugin.json` is bumped on `main`; a change without a bump is not delivered to installed copies.
+New versions reach you when the `version` in `plugin/.claude-plugin/plugin.json` is bumped on `main`; a change without a bump is not delivered to installed copies.
 
 **Update now.** Any one of these, then run `/reload-plugins`:
 
@@ -168,7 +168,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Quick checks:
 
 ```bash
 claude plugin validate .
-claude plugin test .
+claude plugin validate plugin
+bash scripts/test.sh
 ```
 
 ## Feedback and ideas

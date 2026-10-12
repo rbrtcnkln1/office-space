@@ -380,9 +380,11 @@ describe('in the engine', () => {
 describe('team: plain words', () => {
   test('a thing a look has no part for is said plainly, with no closest options', async () => {
     const io = fake({ replies: ['{"changes":[{"role":"coder","accessory":"headphones"}],"unknown":[{"text":"white converse"}],"missing":[{"text":"a tattoo","kind":"tattoos"}]}'] })
-    const notes = ((await startTeam('headphones, converse and a tattoo for the coder', io)).flow?.notes ?? []).join('\n')
+    const f = (await startTeam('headphones, converse and a tattoo for the coder', io)).flow
+    const notes = (f?.notes ?? []).join('\n')
     expect(notes).toContain("Tattoos aren't part of a team member's look yet.")
-    expect(notes).toContain("Shoes aren't part of a team member's look yet.")
+    // shoes can be drawn: offered for the one role the reply changed
+    expect(f?.offers).toEqual([{ text: 'white converse', slot: 'shoes', role: 'coder' }])
     expect(notes).not.toContain('Closest options')
   })
   test('the prompt names the ids with their names', () => {

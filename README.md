@@ -46,7 +46,7 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 
 Type `/office-space` in the prompt and the menu lists all of them. The older `/office-space band` still works.
 
-**Which commands use plan usage?** Only `/office-space-roster` and, when you describe something in words, `/office-space-boss`, `/office-space-team` and `/office-space-office` (the step-by-step choices, `list`, `remove <piece>` and `reset` use none, and `/office-space-theme` never uses any). Each roster run makes one small-model request (Haiku, low effort, a few hundred tokens) that sends every worker's task and recent steps and gets one-line summaries back. It happens outside your conversation, so it adds nothing to your chat context, and the reply is checked before it is shown. If the call fails, times out, is offline, or the reply is unusable, the roster shows each worker's own task text instead and says so. The other commands read local data only. Nothing runs an AI call on its own.
+**Which commands use plan usage?** Only `/office-space-roster` and, when you describe something in words, `/office-space-boss`, `/office-space-team` and `/office-space-office` (the step-by-step choices, `list`, `parts`, `remove <piece>` and `reset` use none, and `/office-space-theme` never uses any). Pressing **Draw it** for a part the catalog lacks makes one call to a more capable model (Sonnet, low effort, a capped reply), so it uses a bit more than reading words. Each roster run makes one small-model request (Haiku, low effort, a few hundred tokens) that sends every worker's task and recent steps and gets one-line summaries back. It happens outside your conversation, so it adds nothing to your chat context, and the reply is checked before it is shown. If the call fails, times out, is offline, or the reply is unusable, the roster shows each worker's own task text instead and says so. The other commands read local data only. Nothing runs an AI call on its own.
 
 Sample roster:
 
@@ -97,18 +97,31 @@ Four commands change how the office looks: `/office-space-boss` (the Boss), `/of
 
 ## Make the Boss yours
 
-Give the Boss a new look, from a small catalog of pixel-art hair styles, hair colors, outfits and accessories:
+Give the Boss a new look, from a small catalog of pixel-art hair styles, hair colors, outfits, clothing colors and accessories:
 
 ```
 /office-space-boss pink frosted hair, an early-2000s track jacket and headphones
+/office-space-boss silver hair, a white tee and blue jeans
 ```
 
-- Run it with no words and the Office Space panel walks you through hair style, hair color, outfit and accessory, a few buttons each. Type your own into **Other** and it is read the same way as plain words.
+- Run it with no words and the Office Space panel walks you through hair style, hair color, outfit, top color, trouser color (skipped for a suit, which is one piece) and accessory, a few buttons each. Type your own into **Other** and it is read the same way as plain words.
+- Clothing colors: white, black, gray, red, orange, yellow, green, teal, blue, navy, purple, pink, brown, tan and denim, for the top and the bottom of any outfit. Leave one unset and the outfit keeps its own color.
 - Whatever you ask for, you see what will change and press **Apply** (or **Cancel**) before anything is saved. The look is kept between sessions. `/office-space-boss reset` brings the default back.
-- If you ask for something the catalog does not have yet, such as a jetpack, the reply says so and lists the closest options.
+- If you ask for something the catalog does not have yet, the reply says so. When it is something worn or held (a cowboy hat, sneakers, a print on the shirt, a beard, wings), the panel also offers **Draw it** (see [Drawn parts](#drawn-parts)).
 - Reading your words (and "Other") makes one small call to a fast model, so it uses a little of your plan usage. Picking buttons does not. Nothing is added to your conversation.
 
 ![The default Boss next to a customized one](docs/media/boss-before-after.png)
+
+### Drawn parts
+
+When the catalog has nothing for what you asked, press **Draw it** and the AI draws it as a tiny pixel grid in the sprite's own format: a hat, a face accessory (beard, sunglasses), a shirt print, shoes, something held, or something on the back (wings, a cape).
+
+- The panel shows the character before and after. **Apply** keeps it, **Retry** draws again, **Cancel** drops it. The look itself is still only saved when you press the final **Apply**.
+- Drawing uses a more capable model than reading words (one call per drawing, a capped reply), so it uses **a bit more plan usage**. The catalog path stays free for buttons and instant.
+- Every drawing is checked before it is shown: exact size for its slot, only the allowed palette letters, not empty and not too full, and a hat may not cover the eyes. A drawing that breaks a rule is retried once automatically; if it fails again, you get Retry and Cancel. A drawing is data only, never run.
+- Kept parts are yours to reuse: `/office-space-team give the Coder my cowboy hat`, `/office-space-boss wear my cowboy hat`. `/office-space-boss parts` lists them (up to 24) and `/office-space-boss parts delete cowboy hat` removes one (and takes it off whoever wears it). Themes carry the drawn parts their looks wear.
+
+![The Boss before and after: silver hair, a white tee with a drawn print, blue jeans, headphones, drawn white sneakers and a drawn cowboy hat; below, the office at its usual size](docs/media/drawn-parts.png)
 
 ## Decorate the office
 
@@ -136,7 +149,8 @@ Rename the roles, restyle them from the same catalog as the Boss, and choose how
 /office-space-team start with ten desks
 ```
 
-- Run it with no words and the panel asks what to change (a team member or the desk count), which role, which part (title, hair, outfit, accessory), then a few buttons. **Other** takes a role name, a new title, a number, or words read like plain ones.
+- Run it with no words and the panel asks what to change (a team member or the desk count), which role, which part (title, hair, outfit and its colors, accessory), then a few buttons. **Other** takes a role name, a new title, a number, or words read like plain ones.
+- Drawn parts work here too: ask for something the catalog lacks and press **Draw it**, or reuse one you kept (`give the Coder my cowboy hat`, no AI call). See [Drawn parts](#drawn-parts).
 - You see what will change and press **Apply** (or **Cancel**) before anything is saved. Kept between sessions. `/office-space-team reset` restores every default and `/office-space-team reset coder` restores one role.
 - Titles are your own text: control characters are removed, they are cut at 14 characters and always drawn as plain text. A part you do not change keeps the role's built-in look. The Boss has its own command.
 - Desks: 5 to 15, in rows of five (5 is the room's smallest layout, so you can only add). It sets the starting size; the room still grows when more workers arrive and never takes a desk away from someone sitting at it. Mapping task words to roles is not part of this command yet.
@@ -159,7 +173,7 @@ A theme is your Boss look, team and office in one small file you can keep, share
 
 - Loading always shows what will change and waits for **Apply**. Nothing happens on its own.
 - Three presets ship with the mod: **90s startup**, **cozy library** and **night shift**. They use only catalog parts.
-- A theme file is **data only**. It is checked key by key against the catalog and the team rules: an unknown key, an unknown part, a bad title, a file over 8 KB or anything that is not valid JSON refuses the whole file, and nothing in it is ever run. Only the sections you saved are written; a section a file leaves out is left alone when it loads.
+- A theme file is **data only**. It is checked key by key against the catalog and the team rules: an unknown key, an unknown part, a bad title, a drawn part that breaks the drawing rules (or is named but not in the file), a file over 16 KB or anything that is not valid JSON refuses the whole file, and nothing in it is ever run. Older theme files (without clothing colors or drawn parts) still load. Only the sections you saved are written; a section a file leaves out is left alone when it loads.
 - Themes use no AI and no plan usage.
 
 Format (version 1):
@@ -169,19 +183,25 @@ Format (version 1):
   "format": "office-space-theme",
   "version": 1,
   "name": "night owls",
-  "boss": { "hair": "short", "hairColor": "black", "outfit": "hoodie", "accessory": "headphones" },
+  "boss": { "hair": "short", "hairColor": "black", "outfit": "hoodie", "accessory": "headphones", "bottom": "black" },
   "team": {
     "titles": { "coder": "Night Owl" },
-    "looks": { "coder": { "hairColor": "purple", "outfit": "hoodie" } },
+    "looks": { "coder": { "hairColor": "purple", "outfit": "hoodie", "top": "navy", "parts": { "hat": "cowboy-hat-fk5yka" } } },
     "desks": 10
   },
   "office": {
     "wall": "charcoal",
     "floor": "gray-carpet",
     "items": { "break": "vending-machine", "bottom-3": "fish-tank" }
-  }
+  },
+  "parts": [
+    { "id": "cowboy-hat-fk5yka", "name": "cowboy hat", "slot": "hat",
+      "rows": ["......BBBB......", ".....BBeBBB.....", ".....bbbbbb.....", "B...BBBBBBBB...B", ".BBBBBBBBBBBBBB.", "................", "................"] }
+  ]
 }
 ```
+
+`top`, `bottom` and `parts` are optional. Each drawn part is a grid of palette letters at its slot's exact size (hat 16x7, face 10x7, shirt print 6x4, shoes 3x2, held item 5x6, back 16x12); `.` is transparent.
 
 All sections but `format`, `version` and `name` are optional. `boss` needs all four parts; `looks` can name any of `hair`, `hairColor`, `outfit`, `accessory`. `office` is the same decor `/office-space-office` saves: a `wall` and `floor` id and `items` mapping a spot (`break`, `wall-door`, `wall-table`, `wall-cooler`, `bottom-1` to `bottom-5`) to a piece that fits there; a part left out is the plain default. Role ids are `planner`, `researcher`, `coder`, `writer`, `analyst`, `maintainer`, `deployer`, `reviewer`, `skeptic`, `optimist`.
 
@@ -213,7 +233,7 @@ A Claude Code version that supports plugin hook modules (2.1.29x or newer); olde
 
 ## FAQ
 
-**Does it use my context or tokens?** Not your context: it only draws UI and answers commands as text, with no skills, agents or prompt text, so it adds nothing to Claude's context. The exceptions to "no tokens" are `/office-space-roster`, and `/office-space-boss`, `/office-space-team` and `/office-space-office` with words, which spend a little plan usage on one small side request each time you run them (see [Commands](#commands)).
+**Does it use my context or tokens?** Not your context: it only draws UI and answers commands as text, with no skills, agents or prompt text, so it adds nothing to Claude's context. The exceptions to "no tokens" are `/office-space-roster`, and `/office-space-boss`, `/office-space-team` and `/office-space-office` with words, which spend a little plan usage on one small side request each time you run them, and pressing **Draw it**, which uses a bit more (see [Commands](#commands)).
 
 **How do I update?** Type `/office-space-update`, or see [Updating](#updating) for the manual and automatic options.
 

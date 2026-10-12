@@ -27,11 +27,11 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 
-import { ACTIVE, Office, SCALE } from './office'
+import { ACTIVE, Office, SCALE, portraitSvg } from './office'
 import { ROLES } from './sprites'
 import { BOSS_HELP, IN_PANEL, actBoss, bossView, startBoss } from './boss'
 import type { BossIo, Flow, Outcome as BossOutcome } from './boss'
-import type { Action } from './flow'
+import type { Action, FlowView } from './flow'
 import { OFFICE_HELP, IN_PANEL as OFFICE_IN_PANEL, actOffice, officeView, startOffice } from './decorate'
 import type { OFlow, OfficeIo, Outcome as OfficeOutcome } from './decorate'
 import { isDefaultOffice, sanitizeOffice } from './decor'
@@ -40,8 +40,11 @@ import { TEAM_HELP, TEAM_IN_PANEL, actTeam, isEmptyTeam, sanitizeTeam, startTeam
 import type { Team, TeamFlow, TeamOutcome } from './team'
 import { MAX_THEME_BYTES, THEME_HELP, PRESETS, currentTheme, findPreset, parseTheme, resetTheme, slug, themeChangesNothing, themeLines, themeToJson, themeView, validName } from './theme'
 import type { Current, Theme, ThemeFlow } from './theme'
-import { DEFAULT_LOOK, sanitizeLook } from './catalog'
+import { DEFAULT_LOOK, sameLook, sanitizeLook } from './catalog'
 import type { BossLook } from './catalog'
+import { DRAW_MAX_TOKENS, DRAW_MODEL } from './draw'
+import { PART_SLOTS, addParts, findPart, libraryMap, partsListText, resolveParts, sanitizeParts } from './parts'
+import type { CustomPart } from './parts'
 import type { AgentLike } from './office'
 import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, classifyWorker, expandDir, inScope, alertText, isWorkerFile, newlyNeeding, normalizePath, parseWorker, toAgents } from './external'
 import type { ExternalWorker } from './external'
@@ -59,6 +62,7 @@ const STORE_BAND = 'band'
 const STORE_BOSS = 'bossLook'
 const STORE_OFFICE = 'officeLook'
 const STORE_TEAM = 'team'
+const STORE_PARTS = 'drawnParts'
 const THEMES_DIR = '.claude/office-space/themes' // under $HOME
 const BOSS_MODEL = 'haiku' // the smallest, fastest model: one short side call
 const STORE_UPDATE_CHECKED = 'updateChecked'
@@ -89,6 +93,7 @@ let activeFlow: ActiveFlow | null = null
 let bossLook: BossLook | undefined // saved Boss customization; undefined draws the default
 let officeLook: OfficeLook | undefined // saved office decoration; undefined draws the plain office
 let team: Team | undefined // saved team titles, looks and starting desks; undefined draws the defaults
+let partLib: CustomPart[] = [] // the user's drawn parts (./parts.ts)
 let timer: { cancel: () => void } | null = null
 let lastStep = 0 // ms of the last simulation step (from any driver)
 let paneOpen = false
@@ -504,7 +509,7 @@ export const COMMANDS: Command[] = [
   {
     name: 'office-space-boss',
     description: 'Change how the Boss looks, in plain words or step by step (uses a little plan usage)',
-    argumentHint: '[pink spiky hair, headphones | reset]',
+    argumentHint: '[silver hair, a white tee, blue jeans | parts | reset]',
     run: (args) => ({ boss: args }),
   },
   {
@@ -516,7 +521,7 @@ export const COMMANDS: Command[] = [
   {
     name: 'office-space-team',
     description: 'Rename roles, restyle them and set the starting desk count, in words or step by step (uses a little plan usage)',
-    argumentHint: '[call the Coder "Mx. Bytes" | reset <role>]',
+    argumentHint: '[call the Coder "Mx. Bytes" | give the Coder my cowboy hat | parts | reset <role>]',
     run: (args) => ({ team: args }),
   },
   {
@@ -667,9 +672,35 @@ async function sideCall($: EngineInterface, system: string, prompt: string, maxT
   return r.isAnswered ? r.text : null
 }
 
+const DRAW_TIMEOUT_MS = 90000
+/** The drawing call (./draw.ts): a more capable model than the side call, a capped reply, no history, no tools. */
+async function drawCall($: EngineInterface, system: string, prompt: string): Promise<string | null> {
+  const r = await $.model.complete({ model: DRAW_MODEL, system, prompt, maxTokens: DRAW_MAX_TOKENS, effort: 'low', timeoutMs: DRAW_TIMEOUT_MS })
+  return r.isAnswered ? r.text : null
+}
+
+/** Keeps a drawn part in the user's library (capped) and puts it on the drawing. */
+async function keepPart($: EngineInterface, p: CustomPart) {
+  setParts(addParts(partLib, [p]))
+  try { await $.store.set(STORE_PARTS, partLib) } catch {}
+}
+function setParts(lib: CustomPart[]) {
+  partLib = lib
+  office.partLib = libraryMap(lib)
+}
+/** The drawing, the library and the reuse of drawn parts, shared by the Boss and team flows. */
+function partsIo($: EngineInterface) {
+  return {
+    draw: (system: string, prompt: string) => drawCall($, system, prompt),
+    parts: async () => partLib,
+    keepPart: (p: CustomPart) => keepPart($, p),
+  }
+}
+
 /** Wire the Boss flow to this plugin's `$`: a small side model call and the saved look. */
 function bossIo($: EngineInterface): BossIo {
   return {
+    ...partsIo($),
     complete: (system, prompt) => sideCall($, system, prompt),
     load: async () => sanitizeLook(await $.store.get(STORE_BOSS)),
     save: async (look) => { await $.store.set(STORE_BOSS, look) },
@@ -688,6 +719,7 @@ function officeIo($: EngineInterface): OfficeIo {
 /** The same for the team. */
 function teamIo($: EngineInterface) {
   return {
+    ...partsIo($),
     complete: (system: string, prompt: string) => sideCall($, system, prompt, 400),
     load: async () => sanitizeTeam(await $.store.get(STORE_TEAM)),
     save: async (t: Team | null) => { await $.store.set(STORE_TEAM, t) },
@@ -701,7 +733,7 @@ function applyLooks() {
   office.setTeam(team)
 }
 
-const isDefaultBoss = (d: BossLook): boolean => d.hair === DEFAULT_LOOK.hair && d.hairColor === DEFAULT_LOOK.hairColor && d.outfit === DEFAULT_LOOK.outfit && d.accessory === DEFAULT_LOOK.accessory
+const isDefaultBoss = (d: BossLook): boolean => sameLook(d, DEFAULT_LOOK)
 const setBoss = (d: BossLook | undefined) => { bossLook = d && !isDefaultBoss(d) ? d : undefined }
 const setOffice = (l: OfficeLook | undefined) => { officeLook = l && !isDefaultOffice(l) ? l : undefined }
 const setTeamLook = (t: Team | undefined) => { team = t && !isEmptyTeam(t) ? t : undefined }
@@ -736,8 +768,47 @@ async function showPanel($: EngineInterface) {
 const HELP: Record<FlowId, string> = { boss: BOSS_HELP, office: OFFICE_HELP, team: TEAM_HELP }
 const IN_PANEL_TEXT: Record<FlowId, string> = { boss: IN_PANEL, office: OFFICE_IN_PANEL, team: TEAM_IN_PANEL }
 
+/**
+ * `parts`, `parts delete <name>`: the user's drawn parts (no AI call). A
+ * deleted part also comes off the Boss and the team.
+ */
+async function partsCommand($: EngineInterface, rest: string): Promise<string> {
+  await loadSaved($)
+  const m = /^(?:delete|remove|forget)\s+(.+)$/i.exec(rest)
+  if (!m) return partsListText(partLib)
+  const p = findPart(partLib, m[1] as string)
+  if (!p) return `You have no drawn part called "${(m[1] as string).replace(/[^\x20-\x7e]/g, '').slice(0, 30)}".\n${partsListText(partLib)}`
+  setParts(partLib.filter((x) => x.id !== p.id))
+  try { await $.store.set(STORE_PARTS, partLib) } catch {}
+  const off = <T extends Partial<BossLook>>(l: T): T => {
+    if (!l.parts || !PART_SLOTS.some((s) => l.parts?.[s] === p.id)) return l
+    const parts = { ...l.parts }
+    for (const s of PART_SLOTS) if (parts[s] === p.id) delete parts[s]
+    const out = { ...l, parts }
+    if (!Object.keys(parts).length) delete out.parts
+    return out
+  }
+  if (bossLook) {
+    setBoss(off(bossLook))
+    try { await $.store.set(STORE_BOSS, bossLook ?? null) } catch {}
+  }
+  if (team) {
+    const looks: Team['looks'] = {}
+    for (const [r, l] of Object.entries(team.looks)) if (l) (looks as Record<string, unknown>)[r] = off(l)
+    setTeamLook(sanitizeTeam({ ...team, looks }))
+    try { await $.store.set(STORE_TEAM, team ?? null) } catch {}
+  }
+  applyLooks()
+  $.ui.invalidate('ui.render')
+  return `Deleted the drawn part "${p.name}".`
+}
+
 /** Start a customization command; choices to make are drawn in the panel, so make sure it is showing. */
 async function runCustomize($: EngineInterface, id: FlowId, args: string): Promise<Reply> {
+  const pm = /^\s*parts\b\s*(.*)$/i.exec(args)
+  if (pm && id !== 'office') {
+    try { return { text: await partsCommand($, (pm[1] as string).trim()) } } catch { return { text: HELP[id] } }
+  }
   try {
     const r = id === 'boss' ? await startBoss(args, bossIo($)) : id === 'office' ? await startOffice(args, officeIo($)) : await startTeam(args, teamIo($))
     const text = takeOutcome($, id, r)
@@ -769,8 +840,10 @@ function pressFlow($: EngineInterface, a: Action, token?: string) {
   flowPressing = true
   void (async () => {
     try {
-      if (a.kind === 'other') {
-        activeFlow = { ...cur, flow: { ...cur.flow, busy: true } } as ActiveFlow
+      const drawing = a.kind === 'retry' || (a.kind === 'choose' && /^draw\d$/.test(a.id))
+      if (a.kind === 'other' || drawing) {
+        const busyText = drawing ? 'Drawing it (a more capable model; this takes a few seconds)...' : undefined
+        activeFlow = { ...cur, flow: { ...cur.flow, busy: true, ...(busyText ? { busyText } : {}) } } as ActiveFlow
         $.ui.invalidate('ui.render')
       }
       const r = cur.id === 'boss' ? await actBoss(cur.flow, a, bossIo($)) : cur.id === 'office' ? await actOffice(cur.flow, a, officeIo($)) : await actTeam(cur.flow, a, teamIo($))
@@ -798,10 +871,11 @@ async function loadSaved($: EngineInterface) {
     setOffice(saved === undefined || saved === null ? undefined : sanitizeOffice(saved))
   } catch {}
   try { setTeamLook(sanitizeTeam(await $.store.get(STORE_TEAM))) } catch {}
+  try { setParts(sanitizeParts(await $.store.get(STORE_PARTS))) } catch {}
   applyLooks()
 }
 
-const current = (): Current => ({ boss: bossLook ?? { ...DEFAULT_LOOK }, team: team ?? { titles: {}, looks: {} }, office: officeLook ?? sanitizeOffice(undefined) })
+const current = (): Current => ({ boss: bossLook ?? { ...DEFAULT_LOOK }, team: team ?? { titles: {}, looks: {} }, office: officeLook ?? sanitizeOffice(undefined), parts: partLib })
 
 async function themesDir($: EngineInterface): Promise<string | null> {
   try {
@@ -893,6 +967,11 @@ function pressTheme($: EngineInterface, f: ThemeFlow, a: Action) {
   void (async () => {
     try {
       const t = f.theme
+      // the theme's drawn parts join the library first, so its looks can wear them
+      if (t.parts?.length) {
+        setParts(addParts(partLib, t.parts))
+        try { await $.store.set(STORE_PARTS, partLib) } catch {}
+      }
       if (t.boss) {
         setBoss(t.boss)
         try { await $.store.set(STORE_BOSS, bossLook ?? null) } catch {}
@@ -944,6 +1023,22 @@ function keep<T>(e: RenderInput, key: string, props: Record<string, unknown>, fn
   return el
 }
 
+/** Before and after a drawn part, drawn large (kept while the same part is showing). */
+let previewMemo = { key: '', svg: '' }
+function previewSvg(pv: NonNullable<FlowView['preview']>, lib: ReadonlyMap<string, CustomPart>): string {
+  const key = `${pv.role}|${pv.part.id}|${JSON.stringify(pv.before)}`
+  if (previewMemo.key === key) return previewMemo.svg
+  const withNew = new Map(lib)
+  withNew.set(pv.part.id, pv.part)
+  const fig = (look: Partial<BossLook>, map: ReadonlyMap<string, CustomPart>) => {
+    const parts = resolveParts(look.parts, map)
+    return { role: pv.role, look, ...(parts ? { parts } : {}) }
+  }
+  const svg = portraitSvg([fig(pv.before, lib), fig(pv.after, withNew)], 6, office.floorColor())
+  previewMemo = { key, svg }
+  return svg
+}
+
 /** The steps as buttons (and a text field for "Other" where the surface has one), the same for every command. */
 function flowView($: EngineInterface, e: RenderInput) {
   const cur = activeFlow
@@ -957,13 +1052,36 @@ function flowView($: EngineInterface, e: RenderInput) {
     keep(e, key, { label, token }, () => pressFlow($, a, token), (onPress) => <Button key={key} label={label} onPress={onPress} />)
   const note = v.notes.length ? <Text dimColor>{v.notes.join(' ')}</Text> : null
   const cancel = button(`${v.id}-cancel`, 'Cancel', { kind: 'cancel' })
-  if (v.busy) return <Box flexDirection="column"><Text bold>{v.title}</Text><Text dimColor>Asking the AI...</Text></Box>
+  if (v.busy) return <Box flexDirection="column"><Text bold>{v.title}</Text><Text dimColor>{v.busyText ?? 'Asking the AI...'}</Text></Box>
+  const extra = (v.extra ?? []).map((o) => button(`${v.id}-${v.stepKey}-${o.id}`, o.label, { kind: 'choose', id: o.id }))
+  if (v.stage === 'preview') {
+    const pv = v.preview
+    const { Svg } = t as { Svg?: (p: { source: string; alt: string; width?: number }) => unknown }
+    const lib = libraryMap(partLib)
+    const shown = pv
+      ? (Svg && e.surface !== 'terminal'
+        ? <Svg source={previewSvg(pv, lib)} alt={`Preview of the drawn ${pv.part.name}`} />
+        : <Box flexDirection="column">{pv.part.rows.map((r, i) => <Text key={`${v.id}-pv${i}`}>{r}</Text>)}</Box>)
+      : null
+    return (
+      <Box flexDirection="column">
+        <Text bold>{v.heading}</Text>
+        {shown}
+        {v.summary.map((l, i) => <Text key={`${v.id}-l${i}`} dimColor>{l}</Text>)}
+        {note}
+        {pv ? button(`${v.id}-draw-apply`, 'Apply', { kind: 'apply' }) : null}
+        {button(`${v.id}-draw-retry`, 'Retry', { kind: 'retry' })}
+        {cancel}
+      </Box>
+    )
+  }
   if (v.stage === 'confirm') {
     return (
       <Box flexDirection="column">
         <Text bold>{v.heading}</Text>
         {v.summary.map((l, i) => <Text key={`${v.id}-l${i}`}>{l}</Text>)}
         {note}
+        {extra}
         {button(`${v.id}-apply`, 'Apply', { kind: 'apply' })}
         {v.restart === false ? null : button(`${v.id}-restart`, 'Start over', { kind: 'restart' })}
         {cancel}
@@ -976,6 +1094,7 @@ function flowView($: EngineInterface, e: RenderInput) {
     <Box flexDirection="column">
       <Text bold>{v.heading}</Text>
       {v.options.map((o) => button(`${v.id}-${v.stepKey}-${o.id}`, o.label, { kind: 'choose', id: o.id }))}
+      {extra}
       {Input && v.other
         ? keep(e, otherKey, { placeholder, token }, (x: string) => pressFlow($, { kind: 'other', text: x }, token), (onSubmit) => <Input key={otherKey} label="Other: " placeholder={placeholder} onSubmit={onSubmit} />)
         : null}
@@ -1025,7 +1144,7 @@ export function helpText(): string {
     ...lines,
     '',
     'Settings (/plugin -> office-space -> configure): workersDir, staleMinutes, alertOnBlocked, checkForUpdates, showUsage.',
-    'Only /office-space-roster, and /office-space-boss, /office-space-team and /office-space-office (with words, or Other), make an AI call (one small-model request per ask, outside your chat); everything else is local. None of it adds anything to your conversation.',
+    'Only /office-space-roster, and /office-space-boss, /office-space-team and /office-space-office (with words, or Other), make an AI call (one small-model request per ask, outside your chat). Pressing Draw it for something the catalog lacks makes one call to a more capable model, so it uses a bit more plan usage; everything else is local. None of it adds anything to your conversation.',
     'Docs: https://github.com/rbrtcnkln1/office-space#readme',
   ].join('\n')
 }

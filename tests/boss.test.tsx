@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { STEP_QUESTIONS, actBoss, buildPrompt, interpret, startBoss, stepOptions, summaryLines } from '../hooks/boss'
+import { OUTFIT_COLOR, STEP_QUESTIONS, actBoss, bossView, buildPrompt, interpret, startBoss, stepOptions, summaryLines } from '../hooks/boss'
 import type { Action, BossIo, Flow } from '../hooks/boss'
 import { ACCESSORIES, CATALOG, DEFAULT_LOOK, HAIR_COLORS, HAIR_STYLES, OUTFITS, SLOTS, parseLookPatch, sanitizeLook } from '../hooks/catalog'
 import type { BossLook, Slot } from '../hooks/catalog'
@@ -8,6 +8,7 @@ import { character, paletteFor } from '../hooks/sprites'
 import { Office } from '../hooks/office'
 
 const text = (r: unknown) => JSON.stringify(r)
+const KEEP_COLOR = { kind: 'choose', id: OUTFIT_COLOR } as const
 
 // A fake host for the flow: scripted model replies and an in-memory saved look.
 function fake(opts: { replies?: (string | null)[]; saved?: unknown } = {}) {
@@ -200,11 +201,11 @@ describe('/office-space-boss with words', () => {
 })
 
 describe('/office-space-boss stepped choices', () => {
-  test('with no words: hair style, hair color, outfit, accessory, then confirm (AE2)', async () => {
+  test('with no words: hair style, hair color, outfit, top and bottom colors, accessory, then confirm (AE2)', async () => {
     const io = fake()
-    const { o, shown } = await drive('', io, [pick('spiky'), pick('pink'), pick('early-2000s'), pick('headphones'), APPLY])
+    const { o, shown } = await drive('', io, [pick('spiky'), pick('pink'), pick('early-2000s'), KEEP_COLOR, KEEP_COLOR, pick('headphones'), APPLY])
     expect(shown.map((f) => (f.stage === 'pick' ? STEP_QUESTIONS[f.slots[f.i] as Slot] : 'confirm'))).toEqual([
-      'Which hair style for the Boss?', 'Which hair color?', 'Which outfit?', 'Which accessory?', 'confirm',
+      'Which hair style for the Boss?', 'Which hair color?', 'Which outfit?', 'Which color top?', 'Which color trousers?', 'Which accessory?', 'confirm',
     ])
     expect(o.look).toEqual({ hair: 'spiky', hairColor: 'pink', outfit: 'early-2000s', accessory: 'headphones' })
     expect(io.saved).toEqual(o.look)
@@ -227,13 +228,14 @@ describe('/office-space-boss stepped choices', () => {
   })
   test('Other: free text matching the catalog exactly needs no AI call', async () => {
     const io = fake()
-    const { o } = await drive('', io, [other('Bob'), pick('pink'), pick('hoodie'), pick('glasses'), APPLY])
+    const { o } = await drive('', io, [other('Bob'), pick('pink'), pick('hoodie'), KEEP_COLOR, KEEP_COLOR, pick('glasses'), APPLY])
     expect(io.prompts).toHaveLength(0)
     expect(o.look).toMatchObject({ hair: 'bob', hairColor: 'pink', outfit: 'hoodie' })
   })
   test('Other: other free text goes through the AI, restricted to that step, and its answer is validated', async () => {
     const io = fake({ replies: ['{"hairColor":"pink"}'] })
-    const { o } = await drive('', io, [pick('short'), other('hot magenta please'), pick('suit'), pick('glasses'), APPLY])
+    // a suit is one piece: no separate trousers step
+    const { o } = await drive('', io, [pick('short'), other('hot magenta please'), pick('suit'), KEEP_COLOR, pick('glasses'), APPLY])
     expect(io.prompts).toHaveLength(1)
     expect(io.prompts[0]).toContain('hairColor:')
     expect(io.prompts[0]).not.toContain('outfit:')
@@ -274,8 +276,8 @@ describe('/office-space-boss stepped choices', () => {
     expect(r.o.flow?.draft).toEqual(DEFAULT_LOOK)
   })
   test('keeping everything is not a change and does not ask for confirmation', async () => {
-    const keep = (slot: Slot) => pick(DEFAULT_LOOK[slot])
-    const r = await drive('', fake(), SLOTS.map(keep))
+    const keep = (slot: Slot) => pick(DEFAULT_LOOK[slot] ?? OUTFIT_COLOR)
+    const r = await drive('', fake(), SLOTS.filter((s) => s !== 'bottom').map(keep))
     expect(r.o.text).toContain('already looks')
     expect(r.shown.every((f) => f.stage === 'pick')).toBe(true)
   })
@@ -361,14 +363,14 @@ describe('in the engine', () => {
     on('model.complete', async () => ({ value: { isAnswered: false, reason: 'aborted' } }) as never)
     await $.command.run({ command: NAME, args: '' } as never)
     const ui = await $.ui.mount({ plugin: 'office-space', surface: 'terminal', component: 'Pane', requestId: 'office-space', props: PANE_PROPS } as never)
-    for (const key of ['boss-hair-spiky', 'boss-hairColor-pink', 'boss-outfit-early-2000s', 'boss-accessory-headphones']) {
+    for (const key of ['boss-hair-spiky', 'boss-hairColor-pink', 'boss-outfit-early-2000s', 'boss-top-white', 'boss-bottom-denim', 'boss-accessory-headphones']) {
       expect(await ui.find({ key } as never)).toBeDefined()
       await ui.press({ key } as never)
     }
     expect(await ui.find({ type: 'Text', text: /apply this change/ })).toBeDefined()
     expect(store.bossLook).toBeUndefined() // not saved until Apply
     await ui.press({ key: 'boss-apply' } as never)
-    expect(store.bossLook).toEqual({ hair: 'spiky', hairColor: 'pink', outfit: 'early-2000s', accessory: 'headphones' })
+    expect(store.bossLook).toEqual({ hair: 'spiky', hairColor: 'pink', outfit: 'early-2000s', accessory: 'headphones', top: 'white', bottom: 'denim' })
     await ui.unmount()
   })
 
@@ -431,7 +433,7 @@ describe('in the engine', () => {
 
 describe('plain words map onto the catalog', () => {
   const ASK = 'Silverhair, headphones, white graphic tee, bluejeans, white converse'
-  test('a literal reply (silver hair, blue jeans, converse all "unknown") is settled: gray hair, no jeans note, shoes said plainly', async () => {
+  test('a literal reply (silver hair, blue jeans, converse all "unknown") is settled: gray hair, denim jeans, shoes offered to draw', async () => {
     const io = fake({ replies: [JSON.stringify({
       outfit: 'tee', accessory: 'headphones',
       unknown: [{ text: 'silver hair', slot: 'hairColor' }, { text: 'blue jeans', slot: 'outfit' }, { text: 'white converse sneakers', slot: 'outfit' }],
@@ -439,18 +441,21 @@ describe('plain words map onto the catalog', () => {
     const o = await startBoss(ASK, io)
     const f = o.flow as Flow
     expect(f.stage).toBe('confirm')
-    expect(f.draft).toEqual({ hair: 'short', hairColor: 'gray', outfit: 'tee', accessory: 'headphones' })
+    expect(f.draft).toEqual({ hair: 'short', hairColor: 'gray', outfit: 'tee', accessory: 'headphones', bottom: 'denim' })
+    expect(f.offers?.map((d) => d.slot)).toEqual(['shoes'])
     const notes = f.notes.join('\n')
-    expect(notes).toContain("Shoes aren't part of the Boss's look yet.")
+    expect(notes).toContain('press Draw it')
+    expect(notes).not.toContain("aren't part of")
     expect(notes).not.toContain('blue jeans')
     expect(notes).not.toContain('silver')
     expect(notes).not.toContain('Closest options')
     expect(summaryLines(f)).toContain('hair color: Dark brown -> Gray')
   })
-  test('a well-behaved reply: synonyms mapped by the model, missing parts listed once', async () => {
-    const io = fake({ replies: ['{"hairColor":"gray","outfit":"tee","accessory":"headphones","missing":[{"text":"white converse","kind":"shoes"},{"text":"converse","kind":"shoes"}]}'] })
+  test('a well-behaved reply: synonyms mapped by the model; shoes become one draw offer, tattoos are said plainly', async () => {
+    const io = fake({ replies: ['{"hairColor":"gray","outfit":"tee","accessory":"headphones","missing":[{"text":"white converse","kind":"shoes"},{"text":"converse","kind":"shoes"},{"text":"a tattoo","kind":"tattoos"}]}'] })
     const f = (await startBoss(ASK, io)).flow as Flow
-    expect(f.notes).toEqual(["Shoes aren't part of the Boss's look yet."])
+    expect(f.offers).toEqual([{ text: 'white converse', slot: 'shoes' }])
+    expect(f.notes[0]).toBe("Tattoos aren't part of the Boss's look yet.")
   })
   test('an ask the model finds ambiguous becomes a step, not a guess', async () => {
     const io = fake({ replies: ['{"outfit":"tee","vague":["hairColor"]}'] })
@@ -465,10 +470,18 @@ describe('plain words map onto the catalog', () => {
     expect(interpret('{"unknown":[{"text":"tattoos"}]}')?.missing).toEqual(['tattoos'])
   })
   test('Other with words for a missing part says so without closest options', async () => {
+    const io = fake({ replies: ['{"missing":[{"text":"a tattoo","kind":"tattoos"}]}'] })
+    const start = (await startBoss('', io)).flow as Flow
+    const r = await actBoss({ ...start, i: 2 }, { kind: 'other', text: 'a tattoo' }, io)
+    expect(r.flow?.notes.join(' ')).toBe("Tattoos aren't part of the Boss's look yet.")
+  })
+  test('Other with something drawable offers to draw it and stays on the step', async () => {
     const io = fake({ replies: ['{"missing":[{"text":"red sneakers","kind":"shoes"}]}'] })
     const start = (await startBoss('', io)).flow as Flow
     const r = await actBoss({ ...start, i: 2 }, { kind: 'other', text: 'red sneakers' }, io)
-    expect(r.flow?.notes.join(' ')).toBe("Shoes aren't part of the Boss's look yet.")
+    expect(r.flow?.i).toBe(2)
+    expect(r.flow?.offers).toEqual([{ text: 'red sneakers', slot: 'shoes' }])
+    expect(bossView(r.flow as Flow)?.extra).toEqual([{ id: 'draw0', label: 'Draw it: red sneakers' }])
   })
   test('the prompt gives ids with their names and the matching rules', async () => {
     let system = ''

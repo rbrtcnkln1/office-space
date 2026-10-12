@@ -8,26 +8,36 @@
 //
 //   {
 //     "format": "office-space-theme", "version": 1, "name": "night shift",
-//     "boss":   { "hair", "hairColor", "outfit", "accessory" },        // optional, catalog ids
+//     "boss":   { "hair", "hairColor", "outfit", "accessory",             // optional, catalog ids
+//                 "top", "bottom", "parts": {slot: part id} },         //   (these three optional too)
 //     "team":   { "titles": {role: "text"}, "looks": {role: {...}}, "desks": 5..15 },   // optional
-//     "office": { "wall", "floor", "items": {slot: piece} }             // optional, catalog ids (./decor.ts)
+//     "office": { "wall", "floor", "items": {slot: piece} },            // optional, catalog ids (./decor.ts)
+//     "parts":  [ { "id", "name", "slot", "rows": [...] } ]             // optional, drawn parts (./parts.ts)
 //   }
+//
+// Clothing colors and drawn parts were added in version 1 as optional fields,
+// so every earlier theme file still loads. A part ref must name a part in the
+// file's own "parts" list; each part is checked like a fresh drawing.
 
-import { DEFAULT_LOOK, SLOTS, changeLines, entry, sameLook } from './catalog'
+import { CORE_SLOTS, DEFAULT_LOOK, OPTIONAL_SLOTS, changeLines, entry, sameLook } from './catalog'
 import type { BossLook } from './catalog'
 import { sanitize } from './external'
 import { normalizeTeam, parseTeamStrict, sameTeam, teamLines } from './team'
 import type { Team } from './team'
+import { PART_SLOTS, libraryMap, parsePartRefs, parsePartStrict } from './parts'
+import type { CustomPart } from './parts'
 import { DEFAULT_OFFICE, SLOTS as DECOR_SLOTS, changeLines as officeChangeLines, fits, floorOf, isDefaultOffice, sameOffice, sanitizeOffice, slotOf, wallOf } from './decor'
 import type { OfficeLook } from './decor'
 import type { FlowView } from './flow'
 
 export const THEME_FORMAT = 'office-space-theme'
 export const THEME_VERSION = 1
-export const MAX_THEME_BYTES = 8192
+export const MAX_THEME_BYTES = 16384
+/** Drawn parts a theme may carry. */
+export const MAX_THEME_PARTS = 12
 export const MAX_NAME = 40
 
-export type Theme = { name: string; boss?: BossLook; team?: Team; office?: OfficeLook }
+export type Theme = { name: string; boss?: BossLook; team?: Team; office?: OfficeLook; parts?: CustomPart[] }
 
 const plain = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
@@ -61,16 +71,39 @@ export function validName(s: unknown): s is string {
   return typeof s === 'string' && s.length > 0 && s.length <= MAX_NAME && sanitize(s) === s && !/[\\/:*?"<>|]/.test(s)
 }
 
-function strictBoss(v: unknown): BossLook | null {
+function strictBoss(v: unknown, known: ReadonlyMap<string, CustomPart>): BossLook | null {
   if (!plain(v)) return null
-  for (const k of Object.keys(v)) if (!(SLOTS as readonly string[]).includes(k)) return null
-  const out: Record<string, string> = {}
-  for (const s of SLOTS) {
+  for (const k of Object.keys(v)) if (!(CORE_SLOTS as readonly string[]).includes(k) && !(OPTIONAL_SLOTS as readonly string[]).includes(k) && k !== 'parts') return null
+  const out: Record<string, unknown> = {}
+  for (const s of CORE_SLOTS) {
     const x = v[s]
     if (typeof x !== 'string' || !entry(s, x)) return null
     out[s] = x
   }
+  for (const s of OPTIONAL_SLOTS) {
+    const x = v[s]
+    if (x === undefined) continue
+    if (typeof x !== 'string' || !entry(s, x)) return null
+    out[s] = x
+  }
+  if (v.parts !== undefined) {
+    const refs = parsePartRefs(v.parts, known)
+    if (!refs) return null
+    if (Object.keys(refs).length) out.parts = refs
+  }
   return out as unknown as BossLook
+}
+
+/** The file's drawn parts: a short list, each checked like a fresh drawing, ids unique. */
+function strictParts(v: unknown): CustomPart[] | null {
+  if (!Array.isArray(v) || v.length > MAX_THEME_PARTS) return null
+  const out: CustomPart[] = []
+  for (const x of v) {
+    const p = parsePartStrict(x)
+    if (!p || out.some((o) => o.id === p.id)) return null
+    out.push(p)
+  }
+  return out
 }
 
 export type Parsed = { theme: Theme } | { error: string }
@@ -82,18 +115,26 @@ export function parseTheme(text: unknown): Parsed {
   let j: unknown
   try { j = JSON.parse(text) } catch { return { error: 'it is not valid JSON' } }
   if (!plain(j)) return { error: 'it is not a theme object' }
-  for (const k of Object.keys(j)) if (!['format', 'version', 'name', 'boss', 'team', 'office'].includes(k)) return { error: `it has an unknown key "${sanitize(k).slice(0, 20)}"` }
+  for (const k of Object.keys(j)) if (!['format', 'version', 'name', 'boss', 'team', 'office', 'parts'].includes(k)) return { error: `it has an unknown key "${sanitize(k).slice(0, 20)}"` }
   if (j.format !== THEME_FORMAT) return { error: `it is not an Office Space theme (format must be "${THEME_FORMAT}")` }
   if (j.version !== THEME_VERSION) return { error: `it uses a theme version this build does not know (expected ${THEME_VERSION})` }
   if (!validName(j.name)) return { error: `its name must be 1 to ${MAX_NAME} plain characters, with no slashes` }
   const theme: Theme = { name: j.name }
+  let parts: CustomPart[] = []
+  if (j.parts !== undefined) {
+    const ps = strictParts(j.parts)
+    if (!ps) return { error: `its drawn parts are not valid (at most ${MAX_THEME_PARTS}, each a small grid of allowed letters at its exact size)` }
+    parts = ps
+    if (ps.length) theme.parts = ps
+  }
+  const known = libraryMap(parts)
   if (j.boss !== undefined) {
-    const b = strictBoss(j.boss)
-    if (!b) return { error: 'its Boss look has a part that is not in the catalog (all four parts are needed)' }
+    const b = strictBoss(j.boss, known)
+    if (!b) return { error: 'its Boss look has a part that is not in the catalog or in the file\'s drawn parts (hair, hair color, outfit and accessory are needed)' }
     theme.boss = b
   }
   if (j.team !== undefined) {
-    const t = parseTeamStrict(j.team)
+    const t = parseTeamStrict(j.team, known)
     if (!t) return { error: 'its team section is not valid (unknown role, title, catalog id or desk count)' }
     theme.team = t
   }
@@ -118,6 +159,7 @@ export function themeToJson(theme: Theme): string {
     if (Object.keys(team).length) o.team = team
   }
   if (theme.office && !isDefaultOffice(theme.office)) o.office = { wall: theme.office.wall, floor: theme.office.floor, items: { ...theme.office.items } }
+  if (theme.parts?.length) o.parts = theme.parts.slice(0, MAX_THEME_PARTS).map((p) => ({ id: p.id, name: p.name, slot: p.slot, rows: [...p.rows] }))
   return JSON.stringify(o, null, 2) + '\n'
 }
 
@@ -179,13 +221,15 @@ export function findPreset(name: string): Theme | undefined {
 
 // ----- applying -----
 
-/** The saved state a theme starts from, and the lines that say what loading it changes. */
-export type Current = { boss: BossLook; team: Team; office: OfficeLook }
+/** The saved state a theme starts from, and the lines that say what loading it changes. `parts` is the user's drawn parts. */
+export type Current = { boss: BossLook; team: Team; office: OfficeLook; parts?: readonly CustomPart[] }
 
 export function themeLines(cur: Current, t: Theme): string[] {
   const out: string[] = []
-  if (t.boss) out.push(...changeLines(cur.boss, t.boss).map((l) => `Boss ${l}`))
-  if (t.team) out.push(...teamLines(cur.team, t.team))
+  const all = libraryMap([...(cur.parts ?? []), ...(t.parts ?? [])])
+  const name = (id: string) => all.get(id)?.name ?? id
+  if (t.boss) out.push(...changeLines(cur.boss, t.boss, name).map((l) => `Boss ${l}`))
+  if (t.team) out.push(...teamLines(cur.team, t.team, name))
   if (t.office) out.push(...officeChangeLines(cur.office, t.office).map((l) => `Office ${l}`))
   return out
 }
@@ -200,17 +244,44 @@ export function resetTheme(): Theme {
   return { name: 'defaults', boss: { ...DEFAULT_LOOK }, team: { titles: {}, looks: {} }, office: { ...DEFAULT_OFFICE, items: {} } }
 }
 
-/** A theme from what is saved now: only the parts that differ from the defaults. */
+/** A theme from what is saved now: only the parts that differ from the defaults, with the drawn parts they wear. */
 export function currentTheme(name: string, cur: Current): Theme {
   const t: Theme = { name }
   if (!sameLook(cur.boss, DEFAULT_LOOK)) t.boss = cur.boss
   if (!sameTeam(cur.team, { titles: {}, looks: {} })) t.team = normalizeTeam(cur.team)
   if (!isDefaultOffice(cur.office)) t.office = cur.office
+  // only the drawn parts something wears, so the file stays small; refs to parts no longer kept are dropped
+  const lib = libraryMap(cur.parts ?? [])
+  const used: CustomPart[] = []
+  const keep = (refs: BossLook['parts']) => {
+    if (!refs) return undefined
+    const out: NonNullable<BossLook['parts']> = {}
+    for (const s of PART_SLOTS) {
+      const p = refs[s] ? lib.get(refs[s] as string) : undefined
+      if (!p || (!used.includes(p) && used.length >= MAX_THEME_PARTS)) continue
+      if (!used.includes(p)) used.push(p)
+      out[s] = p.id
+    }
+    return Object.keys(out).length ? out : undefined
+  }
+  if (t.boss) { const { parts, ...rest } = t.boss; const k = keep(parts); t.boss = { ...rest, ...(k ? { parts: k } : {}) } }
+  if (t.team) {
+    const looks: Team['looks'] = {}
+    for (const [r, l] of Object.entries(t.team.looks)) {
+      if (!l) continue
+      const { parts, ...rest } = l
+      const k = keep(parts)
+      const next = { ...rest, ...(k ? { parts: k } : {}) }
+      if (Object.keys(next).length) (looks as Record<string, unknown>)[r] = next
+    }
+    t.team = { ...t.team, looks }
+  }
+  if (used.length) t.parts = used
   return t
 }
 
 export const THEME_HELP =
-  'Save your look, share it, or load someone else\'s. /office-space-theme save <name> writes a small JSON file (~/.claude/office-space/themes/<name>.json) with your Boss, team and office. load <name or path> reads one back, after showing what will change and asking you to confirm. list shows the built-in presets and your saved themes, and reset puts every default back. A theme file is data only: it is checked key by key and nothing in it is ever run. Themes use no AI and no plan usage.'
+  'Save your look, share it, or load someone else\'s. /office-space-theme save <name> writes a small JSON file (~/.claude/office-space/themes/<name>.json) with your Boss, team and office, and any drawn parts they wear. load <name or path> reads one back, after showing what will change and asking you to confirm. list shows the built-in presets and your saved themes, and reset puts every default back. A theme file is data only: it is checked key by key and nothing in it is ever run. Themes use no AI and no plan usage.'
 
 // ----- the confirmation in the panel -----
 

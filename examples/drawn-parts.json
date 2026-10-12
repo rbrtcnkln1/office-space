@@ -1,0 +1,38 @@
+[
+  {
+    "name": "cowboy hat",
+    "slot": "hat",
+    "rows": [
+      "......BBBB......",
+      ".....BBeBBB.....",
+      ".....bbbbbb.....",
+      "B...BBBBBBBB...B",
+      ".BBBBBBBBBBBBBB.",
+      "................",
+      "................"
+    ]
+  },
+  {
+    "name": "white sneakers",
+    "slot": "shoes",
+    "rows": ["WWl", "UUU"]
+  },
+  {
+    "name": "smiley print",
+    "slot": "graphic",
+    "rows": [".YYYY.", "YIYYIY", "YYYYYY", ".YIIY."]
+  },
+  {
+    "name": "big beard",
+    "slot": "face",
+    "rows": [
+      "..........",
+      "..........",
+      "..........",
+      ".H......H.",
+      ".HHH..HHH.",
+      "..HHHHHH..",
+      "...HHHH..."
+    ]
+  }
+]

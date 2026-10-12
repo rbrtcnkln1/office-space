@@ -5,8 +5,10 @@
 // from one shared body template, so every role has the same proportions, head
 // size, outline and frame size (16 x 24 logical pixels).
 
-import { entry } from './catalog'
+import { entry, hasBottom } from './catalog'
 import type { BossLook, OutfitDetail } from './catalog'
+import { PART_PALETTE, PART_SLOTS, PART_SPECS } from './parts'
+import type { PartSlot, ResolvedParts } from './parts'
 
 export type Dir = 'down' | 'up' | 'left' | 'right'
 export type Grid = string[][]
@@ -127,19 +129,28 @@ export function paletteFor(role: RoleId, look?: Partial<BossLook>): Palette {
   return { ...BASE, ...FURNITURE, ...ROLES[role].colors, ...(look ? lookColors(look) : {}) } as Palette
 }
 
-/** The palette keys a look changes (hair color and outfit colors); a part left out changes nothing. */
+/** The palette keys a look changes (hair color, outfit and clothing colors); a part left out changes nothing. */
 function lookColors(look: Partial<BossLook>): Palette {
   const hc = look.hairColor ? entry('hairColor', look.hairColor) as { H: string; h: string } | undefined : undefined
   const of = look.outfit ? entry('outfit', look.outfit) as { C: string; c: string; P: string; F: string } | undefined : undefined
+  const top = look.top ? entry('top', look.top) as { C: string; c: string } | undefined : undefined
+  const bottom = look.bottom && hasBottom(look.outfit) ? entry('bottom', look.bottom) as { C: string } | undefined : undefined
   return {
     ...(hc ? { H: hc.H, h: hc.h } : {}),
     ...(of ? { C: of.C, c: of.c, P: of.P, F: of.F } : {}),
+    // A one-piece outfit (a suit) takes the top color on the trousers too, a shade darker.
+    ...(top ? { C: top.C, c: top.c, ...(hasBottom(look.outfit) ? {} : { P: top.c }) } : {}),
+    ...(bottom ? { P: bottom.C } : {}),
+    ...(look.parts && Object.keys(look.parts).length ? PART_PALETTE : {}),
   }
 }
 
-/** A short stable key for caching drawings of a look. */
+/** A short stable key for caching drawings of a look (unchanged for looks without colors or drawn parts). */
 export function lookKey(look?: Partial<BossLook>): string {
-  return look ? `${look.hair ?? ''}.${look.hairColor ?? ''}.${look.outfit ?? ''}.${look.accessory ?? ''}` : ''
+  if (!look) return ''
+  const base = `${look.hair ?? ''}.${look.hairColor ?? ''}.${look.outfit ?? ''}.${look.accessory ?? ''}`
+  const extra = [look.top ?? '', look.bottom ?? '', ...PART_SLOTS.map((s) => look.parts?.[s] ?? '')].join('.')
+  return /[^.]/.test(extra) ? `${base}.${extra}` : base
 }
 
 // ---------- Grid helpers ----------
@@ -189,6 +200,8 @@ export type CharOpts = {
   nod?: boolean
   /** A customization (catalog ids): the Boss's whole look, or the parts of a team member's look that are set. */
   look?: Partial<BossLook>
+  /** The look's drawn parts, resolved to their grids (see ./parts.ts). */
+  parts?: ResolvedParts
 }
 
 function hair(g: Grid, style: HairStyle, dir: Dir) {
@@ -293,6 +306,7 @@ export function character(o: CharOpts): Grid {
   }
 
   const f = o.frame % 4
+  let feet: [number, number][] = []
   // arms + legs per pose
   if (o.pose === 'lounge') {
     // leaning back, hands behind the head, whistling
@@ -317,7 +331,7 @@ export function character(o: CharOpts): Grid {
     } else {
       rect(g, 3, 11, 1, 4, 'C'); dot(g, 3, 15, 'S'); rect(g, 12, 11, 1, 2, 'C'); rect(g, 12, 13, 2, 1, 'S')
     }
-    legs(g, side, 0)
+    feet = legs(g, side, 0)
   } else {
     const walking = o.pose === 'walk'
     const phase = walking ? f : 0
@@ -330,10 +344,11 @@ export function character(o: CharOpts): Grid {
       rect(g, 3, 11, 1, lHand - 11, 'C'); dot(g, 3, lHand, 'S')
       rect(g, 12, 11, 1, rHand - 11, 'C'); dot(g, 12, rHand, 'S')
     }
-    legs(g, side, phase)
+    feet = legs(g, side, phase)
   }
 
   if (look) dress(g, look.outfit ? entry('outfit', look.outfit) as { detail: OutfitDetail } | undefined : undefined, look.accessory ?? 'none', o.dir === 'left' ? 'right' : o.dir, bob)
+  if (o.parts) drawParts(g, o.parts, o.dir === 'left' ? 'right' : o.dir, o.pose, bob, feet)
 
   const out = outline(g)
   return o.dir === 'left' ? mirror(out) : out
@@ -386,17 +401,52 @@ function dress(g: Grid, outfit: { detail: OutfitDetail } | undefined, acc: BossL
   }
 }
 
-function legs(g: Grid, side: boolean, phase: number) {
+/** Draws the legs; returns where each foot's sole starts (for drawn shoes). */
+function legs(g: Grid, side: boolean, phase: number): [number, number][] {
   if (side) {
-    if (phase === 1) { rect(g, 9, 16, 2, 4, 'P'); rect(g, 9, 20, 3, 1, 'F'); rect(g, 6, 16, 2, 3, 'P'); rect(g, 5, 19, 3, 1, 'F') }
-    else if (phase === 3) { rect(g, 6, 16, 2, 4, 'P'); rect(g, 6, 20, 3, 1, 'F'); rect(g, 9, 16, 2, 3, 'P'); rect(g, 9, 19, 3, 1, 'F') }
-    else { rect(g, 7, 16, 3, 4, 'P'); rect(g, 7, 20, 4, 1, 'F') }
-    return
+    if (phase === 1) { rect(g, 9, 16, 2, 4, 'P'); rect(g, 9, 20, 3, 1, 'F'); rect(g, 6, 16, 2, 3, 'P'); rect(g, 5, 19, 3, 1, 'F'); return [[9, 20], [5, 19]] }
+    if (phase === 3) { rect(g, 6, 16, 2, 4, 'P'); rect(g, 6, 20, 3, 1, 'F'); rect(g, 9, 16, 2, 3, 'P'); rect(g, 9, 19, 3, 1, 'F'); return [[6, 20], [9, 19]] }
+    rect(g, 7, 16, 3, 4, 'P'); rect(g, 7, 20, 4, 1, 'F')
+    return [[8, 20]]
   }
   const lLift = phase === 1 ? 1 : 0
   const rLift = phase === 3 ? 1 : 0
   rect(g, 5, 16, 3, 4 - lLift, 'P'); rect(g, 5, 20 - lLift, 3, 1, 'F')
   rect(g, 8, 16, 3, 4 - rLift, 'P'); rect(g, 8, 20 - rLift, 3, 1, 'F')
+  return [[5, 20 - lLift], [8, 20 - rLift]]
+}
+
+/**
+ * Lays the drawn parts (./parts.ts) over a finished body. g faces right for
+ * side views (the caller mirrors it for left). Each part is a grid of palette
+ * letters anchored to its slot; '.' leaves the body showing. Only drawn when a
+ * look names a part, so a look without one draws exactly as before.
+ */
+function drawParts(g: Grid, parts: ResolvedParts, dir: Dir, pose: Pose, bob: number, feet: [number, number][]) {
+  const side = dir === 'left' || dir === 'right'
+  const front = dir === 'down'
+  const lay = (slot: PartSlot, x0: number, y0: number, onto?: (k: string) => boolean) => {
+    const rows = parts[slot]
+    if (!rows) return
+    rows.forEach((row, j) => {
+      for (let i = 0; i < row.length; i++) {
+        const k = row[i] as string
+        const x = x0 + i
+        const y = y0 + j
+        if (k === '.' || y < 0 || y >= g.length || x < 0 || x >= SPRITE_W) continue
+        if (onto && !onto(at(g, x, y))) continue
+        ;(g[y] as string[])[x] = k
+      }
+    })
+  }
+  const sp = (s: PartSlot) => PART_SPECS[s]
+  lay('back', sp('back').x, sp('back').y + bob, (k) => k === '.')
+  if (front && pose !== 'lounge') lay('graphic', sp('graphic').x, sp('graphic').y, (k) => k === 'C' || k === 'c' || k === 'W')
+  if (front) lay('face', sp('face').x, sp('face').y + bob)
+  lay('hat', sp('hat').x, sp('hat').y + bob)
+  // a shoe sits on each foot: its bottom row on the sole, its top row over the ankle
+  for (const [fx, fy] of feet) lay('shoes', fx, fy - (sp('shoes').h - 1))
+  if ((front || side) && pose !== 'seat' && pose !== 'lounge') lay('held', side ? sp('held').x - 1 : sp('held').x, sp('held').y)
 }
 
 // ---------- Props, bubbles, packets (8 x 8 unless noted) ----------

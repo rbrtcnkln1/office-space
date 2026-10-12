@@ -120,6 +120,26 @@ export function hash(s: string): number {
   return h
 }
 const short = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
+/** Desk label: 4 px monospace is ~2.4 px a char; a 64 px cell minus 3 px clear each side holds 24. */
+export const LABEL_CHARS = 24
+export const LABEL_LINES = 2
+/** Wrap on word boundaries (hard-breaking a word longer than a line) into at most maxLines lines; cut text ends in an ellipsis. */
+export function wrapLabel(text: string, maxChars = LABEL_CHARS, maxLines = LABEL_LINES): string[] {
+  const tokens: string[] = []
+  for (const w of text.split(/\s+/)) for (let i = 0; i < w.length; i += maxChars) tokens.push(w.slice(i, i + maxChars))
+  const lines: string[] = []
+  let cur = ''
+  for (const t of tokens) {
+    if (cur && cur.length + 1 + t.length > maxChars) { lines.push(cur); cur = t } else cur = cur ? cur + ' ' + t : t
+  }
+  if (cur) lines.push(cur)
+  if (lines.length > maxLines) {
+    lines.length = maxLines
+    const last = lines[maxLines - 1]
+    lines[maxLines - 1] = (last.length >= maxChars ? last.slice(0, maxChars - 1) : last) + '…'
+  }
+  return lines
+}
 // control characters are invalid in XML and would break the whole drawing
 const esc = (s: string) => sanitize(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
 
@@ -256,7 +276,7 @@ export class Office {
   get rows() { return Math.ceil(this.desks.length / this.cols) }
   get annexRows() { return Math.ceil(this.annex.length / this.cols) }
   get width() { return MARGIN * 2 + this.cols * CELL_W }
-  get height() { return (this.annexRows ? this.annexRowY(this.annexRows - 1) : this.rowY(this.rows - 1)) + 46 }
+  get height() { return (this.annexRows ? this.annexRowY(this.annexRows - 1) : this.rowY(this.rows - 1)) + 48 }
   /** Top of the first annex row: one desk row below the last local one, plus room for the sign. */
   annexRowY(r: number) { return this.rowY(this.rows) + ANNEX_GAP + r * ROW_H }
   bossX() { return MARGIN + 6 } // left, right by the door
@@ -841,7 +861,7 @@ export class Office {
       out.push(`<rect x="${Math.round(mid - titleW / 2 - 5)}" y="${c.y + 31}" width="3" height="3" fill="${this.dot(here)}"/>`)
       out.push(`<text x="${mid}" y="${c.y + 35}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" font-weight="700" fill="#22304a">${esc(role.title)}</text>`)
       const sub = rm?.stale ? `stale ${rm.ageMin}m · ${here.label}` : rm?.need && rm.note ? rm.note : here.label
-      out.push(`<text x="${mid}" y="${c.y + 41}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="4" fill="${rm?.need && !rm.stale ? '#8e2a20' : '#33445f'}">${esc(short(sub, 30))}</text>`)
+      wrapLabel(sub).forEach((ln, i) => out.push(`<text x="${mid}" y="${c.y + 41 + i * 5}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="4" fill="${rm?.need && !rm.stale ? '#8e2a20' : '#33445f'}">${esc(ln)}</text>`))
       const seat = this.seatOf(slot)
       const typing = here.status === 'running'
       const frame = typing ? Math.floor((f + here.seed) / 2) % 4 : Math.floor((f + here.seed) / 6) % 2

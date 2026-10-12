@@ -26,7 +26,7 @@ describe('remote annex', () => {
     expect(o.annex.length).toBe(0)
     expect(o.annexRows).toBe(0)
     expect(o.desks.length).toBe(5)
-    expect(o.height).toBe(o.rowY(o.rows - 1) + 46)
+    expect(o.height).toBe(o.rowY(o.rows - 1) + 48)
     expect(o.render()).not.toContain('REMOTE ANNEX')
   })
 
@@ -68,7 +68,7 @@ describe('remote annex', () => {
     settle(o, 800)
     expect(o.workers.size).toBe(0)
     expect(o.annex.length).toBe(0)
-    expect(o.height).toBe(o.rowY(o.rows - 1) + 46)
+    expect(o.height).toBe(o.rowY(o.rows - 1) + 48)
   })
 
   test('never yanks a desk from under someone: the annex keeps a seated worker\'s row', () => {

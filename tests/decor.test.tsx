@@ -214,7 +214,7 @@ describe('placement never blocks a path', () => {
 })
 
 describe('the default office is unchanged', () => {
-  // Hashes of the renderer as shipped in 0.11.0 (before decor existed), for scenes that need no randomness.
+  // Hashes of the renderer before decor existed (0.11.0 plus the two-line desk label), for scenes that need no randomness.
   const scenes = () => {
     const a = new Office().render(2)
     const o = new Office()
@@ -227,7 +227,7 @@ describe('the default office is unchanged', () => {
   }
   test('draws byte for byte as before', () => {
     const { a, b, c } = scenes()
-    expect([hash(a), a.length, hash(b), b.length, hash(c), c.length]).toEqual([79779184, 23403, 1012290266, 25548, 3603976145, 70173])
+    expect([hash(a), a.length, hash(b), b.length, hash(c), c.length]).toEqual([4224029829, 23421, 875836005, 25566, 437568474, 70173])
   })
   test('a saved default (or none) draws the same as no decor at all', () => {
     const o = new Office()

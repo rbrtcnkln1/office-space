@@ -2,6 +2,9 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## Unreleased
+- Fix: the task line under each desk now wraps to at most two lines (24 characters each, ending in an ellipsis when cut) so neighbouring desks' text no longer runs together.
+
 ## 0.11.0 — 2026-10-11
 Make the Boss yours.
 - New `/office-space-boss`: change the Boss's hair style, hair color, outfit and accessory. Type what you want in plain words, or pick step by step with buttons in the Office Space panel. You see what will change and press Apply before anything is saved. `reset` brings the default back, and your look is kept between sessions.

@@ -20,7 +20,7 @@ test('every command is registered as its own entry and answers when run', async 
 test('/office-space-help lists every command with a description, and the docs link', async ($, on) => {
   mock.clock(on)
   const help = text(await $.command.run({ command: 'office-space-help', args: '' } as never))
-  for (const name of NAMES) expect(help).toContain('/' + name + ' - ')
+  for (const name of NAMES) expect(help).toMatch(new RegExp('/' + name + '( \\[[^\\]]*\\])? - '))
   expect(help).toContain('github.com/rbrtcnkln1/office-space')
 })
 

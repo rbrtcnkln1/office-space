@@ -70,42 +70,54 @@ export function sanitize(s: string): string {
 const clean = (v: unknown, max: number): string =>
   typeof v === 'string' || typeof v === 'number' ? sanitize(String(v)).slice(0, max).trim() : ''
 
+/** Why a worker file was not used, in plain words (shown by /office-space-workers). */
+export type SkipReason = string
+
 /**
- * One file's text → a worker, or null when it is not a usable worker file.
- * Never throws: malformed JSON, wrong types and unknown statuses are null.
+ * One file's text → a worker, or the plain reason it is not one. Never
+ * throws: malformed JSON, wrong types and unknown statuses are skip reasons.
  */
-export function parseWorker(text: string, file: string, mtimeMs = 0): ExternalWorker | null {
+export function classifyWorker(text: string, file: string, mtimeMs = 0): { worker: ExternalWorker } | { skip: SkipReason } {
   let raw: unknown
   try {
     raw = JSON.parse(text)
   } catch {
-    return null
+    return { skip: 'not valid JSON' }
   }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { skip: 'not a JSON object (expected { "status": ... })' }
   const o = raw as Record<string, unknown>
   const status = clean(o.status, 16).toLowerCase()
-  if (!STATUSES.has(status)) return null
+  if (!status) return { skip: 'missing "status"' }
+  if (!STATUSES.has(status)) return { skip: `unknown status "${status}" (use working, waiting, blocked, done or failed)` }
   const id = clean(o.id, 64) || file.replace(/\.json$/i, '')
-  if (!id) return null
+  if (!id) return { skip: 'no usable id' }
   const parsed = typeof o.updated === 'string' || typeof o.updated === 'number' ? new Date(o.updated as string | number).getTime() : NaN
   // A timestamp more than 5 minutes ahead of this machine's clock cannot keep a worker alive forever: use the file's time.
   const updated = Number.isFinite(parsed) && parsed <= Date.now() + FUTURE_SKEW_MS ? parsed : mtimeMs
-  if (!updated) return null
+  if (!updated) return { skip: 'no usable "updated" time' }
   const note = clean(o.note, 120)
   const url = parseUrl(o.url)
   const scope = parseScope(o.scope)
-  if (scope === null) return null // malformed scope: skip the worker rather than show it everywhere
+  if (scope === null) return { skip: 'bad "scope" (use an absolute folder, or a list of them; ~ is allowed)' } // never show a worker everywhere by mistake
   return {
-    id,
-    name: clean(o.name, 40) || id,
-    status: status as ExternalStatus,
-    task: clean(o.task, 120),
-    updated,
-    source: clean(o.source, 16) || 'remote',
-    ...(note ? { note } : {}),
-    ...(url ? { url } : {}),
-    ...(scope ? { scope } : {}),
+    worker: {
+      id,
+      name: clean(o.name, 40) || id,
+      status: status as ExternalStatus,
+      task: clean(o.task, 120),
+      updated,
+      source: clean(o.source, 16) || 'remote',
+      ...(note ? { note } : {}),
+      ...(url ? { url } : {}),
+      ...(scope ? { scope } : {}),
+    },
   }
+}
+
+/** One file's text → a worker, or null when it is not a usable worker file. */
+export function parseWorker(text: string, file: string, mtimeMs = 0): ExternalWorker | null {
+  const r = classifyWorker(text, file, mtimeMs)
+  return 'worker' in r ? r.worker : null
 }
 
 export const MAX_URL_CHARS = 300

@@ -21,3 +21,5 @@ Needs `bun`, `rsvg-convert`, Python 3 with Pillow, and (for the MP4, macOS only)
 To change a scene, edit `frames.ts` (the story and the captions) or the per-scene speed in `SETTINGS` in `build.py`. Break activities that are random in the live mod (coffee, push-ups) are triggered explicitly in the scene so they always happen.
 
 The README's promo thumbnail (`docs/media/teaser-thumbnail.png`) is made by `thumbnail.py`: `python3 scripts/media/thumbnail.py WORK_DIR` takes one `remote-crew` frame from `frames.ts` output, scales it 2x with nearest-neighbour, darkens it and adds the pixel-style title, play button and duration badge. It is not part of `build.sh`.
+
+The usage still in the README (`docs/media/usage-board.png`) comes from `usage-still.ts`: `bun scripts/media/usage-still.ts out.svg && rsvg-convert out.svg -o docs/media/usage-board.png`.

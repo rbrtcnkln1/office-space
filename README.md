@@ -35,8 +35,32 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 | `/office-space-help` | List every Office Space command and setting |
 | `/office-space-update` | Check GitHub for a newer version and update to it (see [Updating](#updating)) |
 | `/office-space-feedback` | Shows the link to report a bug or share an idea, plus your version details to paste in |
+| `/office-space-roster` | Who is at work right now (subagents and outside workers), how long they have been at it, and a one-line summary of what each is doing. Uses a little plan usage (see below) |
+| `/office-space-recap` | Today's hand-ins, failures, outside workers that needed a person, and the Employee of the Day |
+| `/office-space-usage` | Context fill, plan limits with reset times and cost, as plain text. The same figures are drawn in the office (see [Usage in the office](#usage-in-the-office)) |
+| `/office-space-workers` | The outside-workers folder, each worker read from it, and every skipped file with a plain reason |
 
 Type `/office-space` in the prompt and the menu lists all of them. The older `/office-space band` still works.
+
+**Which commands use plan usage?** Only `/office-space-roster`. Each run makes one small-model request (Haiku, low effort, a few hundred tokens) that sends every worker's task and recent steps and gets one-line summaries back. It happens outside your conversation, so it adds nothing to your chat context, and the reply is checked before it is shown. If the call fails, times out, is offline, or the reply is unusable, the roster shows each worker's own task text instead and says so. The other commands read local data only. Nothing runs an AI call on its own.
+
+Sample roster:
+
+```
+Office roster - 2 at work
+  1. Explore - working, 4m on it
+     Reading the plugin hooks to find where commands register
+  2. Backup bot [cron] - blocked, updated 2m ago
+     Task: Copying photos to the NAS
+
+Summaries are written by a small model from each worker's recent steps.
+```
+
+### Usage in the office
+
+The office shows usage as objects, using only what your plan reports: context fill is an **in-tray** on the Boss's desk (the paper stack grows, and turns red near full), the 5-hour session limit is a **wall clock** (the ring fills with the share used and the hands show the reset time), and the weekly limit is a **wall calendar**. A figure your plan does not report is not drawn. They refresh when the numbers change, never faster than the office already animates. Turn them off with the `showUsage` setting.
+
+![The office with an in-tray showing context fill, a wall clock for the session limit and a wall calendar for the weekly limit](docs/media/usage-board.png)
 
 ### Settings
 
@@ -47,6 +71,7 @@ The settings are optional and have defaults. Change them in `/plugin` → office
 | `workersDir` (External workers folder) | `~/.claude/office-space/workers` | Folder of worker JSON files to show |
 | `staleMinutes` (Stale after) | `15` | Minutes without an update before an external worker fades. After 4× that time it leaves |
 | `alertOnBlocked` (Alert when a worker needs you) | on | Show a toast when an external worker becomes waiting or blocked. Once per time it starts needing you, never repeated while it stays that way, and not for workers already waiting when the session starts. Off turns the toast off |
+| `showUsage` (Show usage in the office) | on | Draw context fill, the session limit and the weekly limit as an in-tray, wall clock and wall calendar. Off hides them; `/office-space-usage` still works |
 | `checkForUpdates` (Check for updates daily) | off | Once a day at session start, ask GitHub for the newest version and show one toast if there is one. Off by default |
 
 ### Environment variable
@@ -86,7 +111,7 @@ A Claude Code version that supports plugin hook modules (2.1.29x or newer); olde
 
 ## FAQ
 
-**Does it use my context or tokens?** No. It only draws UI: no skills, agents or prompt text, so it adds nothing to Claude's context.
+**Does it use my context or tokens?** Not your context: it only draws UI and answers commands as text, with no skills, agents or prompt text, so it adds nothing to Claude's context. The one exception to "no tokens" is `/office-space-roster`, which spends a little plan usage on one small side request each time you run it (see [Commands](#commands)).
 
 **How do I update?** Type `/office-space-update`, or see [Updating](#updating) for the manual and automatic options.
 

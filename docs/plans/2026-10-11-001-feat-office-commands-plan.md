@@ -97,3 +97,14 @@ Today the office can be opened, banded, updated and reported on, but people cann
 - **Deferred to planning:** Which host API shows a stepped choice prompt to the user, and how the panel fallback behaves when the panel is closed.
 - **Deferred to planning:** What recent-activity data a plugin can read per agent, and which small model to use for the side calls.
 - **Deferred to planning:** Where the day's history for the recap is kept and when it resets.
+
+---
+
+## Wave 1 Implementation Notes (2026-10-11)
+
+- **Host APIs found.** AI call: `$.model.complete({ model: 'haiku', system, prompt, maxTokens, effort: 'low', timeoutMs })`, a tool-less side call with no history, so nothing enters the conversation; its result is `isAnswered` with text, or a `reason`. Per-agent activity: `$.session.messages({ agentId })` returns that agent's transcript rows (text and tool uses), or `{ deny }`. Usage: `$.session.usage()` and the `session.measure` event (context, rate limits, cost). Stepped choices (wave 2) still need a host prompt API; not part of wave 1.
+- **Roster.** One batched call per run for all workers with activity; strict check (JSON object, numbered keys in range, at most 20 words, no links or markup); fallback to task text with a visible note. Outside workers have no transcript, so their note and status stand in as activity.
+- **Time at it.** The host gives no start time, so a light watcher notes when each agent was first seen at work.
+- **Recap.** `DayTracker` watches the agent list and outside workers every 5 seconds (local reads only, with the office open or closed) and stores the tally in `$.store` as `day:<date>`; a new date starts empty.
+- **Usage objects.** Drawn by `usageart.ts` from `usage.ts` figures; `office.usage` is set from `session.measure` and `$.session.usage()`; `showUsage` clears it.
+- **Workers.** `external.ts` gained `classifyWorker` (skip reasons); `info.ts` builds the report.

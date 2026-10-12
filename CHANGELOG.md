@@ -2,6 +2,15 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## 0.10.0 — 2026-10-11
+Four commands that tell you what is happening in the office, and a usage board.
+- New `/office-space-roster`: everyone at work (subagents and outside workers), their state, how long they have been at it, and a one-line summary of what each is doing. The summaries come from one batched small-model call per run, outside your chat, and the reply is validated before it is shown. When the call fails or there is no activity to read, each line falls back to the worker's own task text and says so. This is the only command that uses plan usage.
+- New `/office-space-recap`: today's hand-ins, failures, outside workers that needed a person and the Employee of the Day, kept per day across sessions.
+- New `/office-space-usage`: context fill, plan limit windows with reset times and cost, as text. Figures the host does not give are left out.
+- New `/office-space-workers`: the watched folder, the workers read from it and each skipped file with a plain reason (invalid JSON, unknown status, missing status, bad scope, too big, too old, symlink, older copy, scoped to another folder). Closes [#13](https://github.com/rbrtcnkln1/office-space/issues/13).
+- Usage in the office: an in-tray (context), a wall clock (session limit) and a wall calendar (weekly limit), refreshed when the numbers change. New setting `showUsage` (on by default) hides them. Closes [#16](https://github.com/rbrtcnkln1/office-space/issues/16).
+- None of the commands add anything to the conversation's context.
+
 ## 0.9.1 — 2026-10-09
 - Fix: `/office-space` now opens on the first try in a new chat; the panel's open state is no longer carried over between chats. The toggle asks the app which panels are actually showing in this session (`$.ui.panes()`), so it opens a panel that is not there and closes one that is, including after the panel's close mark. The band setting is still saved.
 

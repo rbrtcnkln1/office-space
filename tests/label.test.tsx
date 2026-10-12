@@ -38,9 +38,11 @@ describe('desk labels in the render', () => {
     ].map((d, i) => ({ id: `a${i}`, description: d, type: 'general-purpose', status: 'running' }))
     o.sync([])
     o.sync(agents)
+    const lines = () => [...o.render().matchAll(/<text [^>]*font-size="4"[^>]*>([^<]*)<\/text>/g)].map(m => m[1] as string)
     for (let i = 0; i < 1500; i++) o.step()
-    const svg = o.render()
-    const texts = [...svg.matchAll(/<text [^>]*font-size="4"[^>]*>([^<]*)<\/text>/g)].map(m => m[1])
+    // a label is drawn only while its worker is seated; working agents now and then stand up for a stretch
+    for (let i = 0; i < 6000 && lines().length <= 4; i++) o.step()
+    const texts = lines()
     expect(texts.length).toBeGreaterThan(4)
     for (const t of texts) expect(t.length * 0.6 * 4).toBeLessThanOrEqual(58.5)
   })

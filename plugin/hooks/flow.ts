@@ -1,5 +1,6 @@
 // The stepped multiple-choice flow every customization command shares
-// (/office-space-boss, /office-space-office, and the ones to come). Pure types
+// (/office-space-boss, /office-space-office, /office-space-team, and the
+// Apply step of /office-space-theme). Pure types
 // (no `$`).
 //
 // Each command owns its own state machine (what the steps are and what Apply
@@ -33,7 +34,11 @@ export type FlowView = {
   options: Option[]
   /** Show the free-text "Other" field. */
   other: boolean
+  /** The Other field's placeholder (default: describe it in words). */
+  otherHint?: string
   /** The change, one line each (confirm stage). */
   summary: string[]
   notes: string[]
+  /** Offer Start over on the confirm stage (default true; a loaded theme has no steps to restart). */
+  restart?: boolean
 }

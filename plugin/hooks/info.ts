@@ -239,11 +239,17 @@ export class DayTracker {
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
 
-/** The /office-space-recap answer. */
-export function recapText(log: DayLog): string {
+const builtInTitle = (r: RoleId): string | undefined => ROLES[r]?.title
+
+/** The /office-space-recap answer. `titleOf` names a role (the team's custom titles); built-in titles otherwise. */
+export function recapText(log: DayLog, titleOf: (r: RoleId) => string | undefined = builtInTitle): string {
+  const name = (r: string): string => {
+    if (!Object.prototype.hasOwnProperty.call(ROLES, r)) return r
+    try { return titleOf(r as RoleId) || builtInTitle(r as RoleId) || r } catch { return builtInTitle(r as RoleId) ?? r }
+  }
   const lines = ['Office recap - today']
   const roles = Object.entries(log.byRole).sort((a, b) => b[1] - a[1])
-  const by = roles.length ? ` (${roles.slice(0, 4).map(([r, n]) => `${ROLES[r as RoleId]?.title ?? r} ${n}`).join(', ')}${roles.length > 4 ? ', ...' : ''})` : ''
+  const by = roles.length ? ` (${roles.slice(0, 4).map(([r, n]) => `${name(r)} ${n}`).join(', ')}${roles.length > 4 ? ', ...' : ''})` : ''
   lines.push(`  Handed in: ${log.done}${log.done ? by : ''}`)
   if (log.failed) {
     const shown = log.failures.slice(0, 5).map(f => `${f.who}${f.task && f.task !== f.who ? ` - ${f.task}` : ''}`)
@@ -258,7 +264,7 @@ export function recapText(log: DayLog): string {
     lines.push('  Outside workers that needed a person: none')
   }
   const best = roles[0]
-  lines.push(best ? `  Employee of the Day: ${ROLES[best[0] as RoleId]?.title ?? best[0]} (${plural(best[1], 'hand-in', 'hand-ins')})` : '  Employee of the Day: nobody yet')
+  lines.push(best ? `  Employee of the Day: ${name(best[0])} (${plural(best[1], 'hand-in', 'hand-ins')})` : '  Employee of the Day: nobody yet')
   lines.push('', 'Counts cover everything Office Space saw today in your sessions on this machine.')
   return lines.join('\n')
 }

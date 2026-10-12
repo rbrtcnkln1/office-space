@@ -123,14 +123,14 @@ export function roleFor(text: string, seed: number): RoleId {
   return FALLBACK_ROLES[seed % FALLBACK_ROLES.length] as RoleId
 }
 
-export function paletteFor(role: RoleId, look?: BossLook): Palette {
-  return { ...BASE, ...FURNITURE, ...ROLES[role].colors, ...(role === 'boss' && look ? lookColors(look) : {}) } as Palette
+export function paletteFor(role: RoleId, look?: Partial<BossLook>): Palette {
+  return { ...BASE, ...FURNITURE, ...ROLES[role].colors, ...(look ? lookColors(look) : {}) } as Palette
 }
 
-/** The palette keys a Boss look changes (hair color and outfit colors). */
-function lookColors(look: BossLook): Palette {
-  const hc = entry('hairColor', look.hairColor) as { H: string; h: string } | undefined
-  const of = entry('outfit', look.outfit) as { C: string; c: string; P: string; F: string } | undefined
+/** The palette keys a look changes (hair color and outfit colors); a part left out changes nothing. */
+function lookColors(look: Partial<BossLook>): Palette {
+  const hc = look.hairColor ? entry('hairColor', look.hairColor) as { H: string; h: string } | undefined : undefined
+  const of = look.outfit ? entry('outfit', look.outfit) as { C: string; c: string; P: string; F: string } | undefined : undefined
   return {
     ...(hc ? { H: hc.H, h: hc.h } : {}),
     ...(of ? { C: of.C, c: of.c, P: of.P, F: of.F } : {}),
@@ -138,8 +138,8 @@ function lookColors(look: BossLook): Palette {
 }
 
 /** A short stable key for caching drawings of a look. */
-export function lookKey(look?: BossLook): string {
-  return look ? `${look.hair}.${look.hairColor}.${look.outfit}.${look.accessory}` : ''
+export function lookKey(look?: Partial<BossLook>): string {
+  return look ? `${look.hair ?? ''}.${look.hairColor ?? ''}.${look.outfit ?? ''}.${look.accessory ?? ''}` : ''
 }
 
 // ---------- Grid helpers ----------
@@ -187,8 +187,8 @@ export type CharOpts = {
   typing?: boolean
   blink?: boolean
   nod?: boolean
-  /** The Boss's customization (catalog ids); ignored for every other role. */
-  look?: BossLook
+  /** A customization (catalog ids): the Boss's whole look, or the parts of a team member's look that are set. */
+  look?: Partial<BossLook>
 }
 
 function hair(g: Grid, style: HairStyle, dir: Dir) {
@@ -267,9 +267,9 @@ function face(g: Grid, role: Role, dir: Dir, blink: boolean, glasses: boolean) {
 /** One character frame, outlined, 16 x 24. */
 export function character(o: CharOpts): Grid {
   const role = ROLES[o.role]
-  const look = o.role === 'boss' ? o.look : undefined
-  const hairStyle: HairStyle = look ? look.hair : role.hairStyle
-  const glasses = look ? look.accessory === 'glasses' : role.glasses
+  const look = o.look
+  const hairStyle: HairStyle = look?.hair ?? role.hairStyle
+  const glasses = look?.accessory !== undefined ? look.accessory === 'glasses' : role.glasses
   const g = grid(SPRITE_W, SPRITE_H)
   const side = o.dir === 'left' || o.dir === 'right'
   const bob = o.nod ? 1 : 0
@@ -333,7 +333,7 @@ export function character(o: CharOpts): Grid {
     legs(g, side, phase)
   }
 
-  if (look) dress(g, entry('outfit', look.outfit) as { detail: OutfitDetail } | undefined, look.accessory, o.dir === 'left' ? 'right' : o.dir, bob)
+  if (look) dress(g, look.outfit ? entry('outfit', look.outfit) as { detail: OutfitDetail } | undefined : undefined, look.accessory ?? 'none', o.dir === 'left' ? 'right' : o.dir, bob)
 
   const out = outline(g)
   return o.dir === 'left' ? mirror(out) : out

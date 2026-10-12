@@ -36,6 +36,8 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 | `/office-space-update` | Check GitHub for a newer version and update to it (see [Updating](#updating)) |
 | `/office-space-boss` | Change how the Boss looks in plain words or step by step, or `reset` (see [Make the Boss yours](#make-the-boss-yours)) |
 | `/office-space-office` | Decorate the office: wall color, floor, a vending machine, arcade cabinet, couch and more, in plain words or step by step, plus `remove <piece>`, `list` and `reset` (see [Decorate the office](#decorate-the-office)) |
+| `/office-space-team` | Rename roles, restyle them from the catalog and set the starting desk count, in words or step by step; `reset` or `reset coder` (see [Make the team yours](#make-the-team-yours)) |
+| `/office-space-theme` | Save your look as a small file, load one (or a built-in preset), list them, or `reset` (see [Themes](#themes)) |
 | `/office-space-feedback` | Shows the link to report a bug or share an idea, plus your version details to paste in |
 | `/office-space-roster` | Who is at work right now (subagents and outside workers), how long they have been at it, and a one-line summary of what each is doing. Uses a little plan usage (see below) |
 | `/office-space-recap` | Today's hand-ins, failures, outside workers that needed a person, and the Employee of the Day |
@@ -44,7 +46,7 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 
 Type `/office-space` in the prompt and the menu lists all of them. The older `/office-space band` still works.
 
-**Which commands use plan usage?** Only `/office-space-roster` and, when you describe something in words, `/office-space-boss` and `/office-space-office` (the step-by-step choices, `list`, `remove <piece>` and `reset` use none). Each roster run makes one small-model request (Haiku, low effort, a few hundred tokens) that sends every worker's task and recent steps and gets one-line summaries back. It happens outside your conversation, so it adds nothing to your chat context, and the reply is checked before it is shown. If the call fails, times out, is offline, or the reply is unusable, the roster shows each worker's own task text instead and says so. The other commands read local data only. Nothing runs an AI call on its own.
+**Which commands use plan usage?** Only `/office-space-roster` and, when you describe something in words, `/office-space-boss`, `/office-space-team` and `/office-space-office` (the step-by-step choices, `list`, `remove <piece>` and `reset` use none, and `/office-space-theme` never uses any). Each roster run makes one small-model request (Haiku, low effort, a few hundred tokens) that sends every worker's task and recent steps and gets one-line summaries back. It happens outside your conversation, so it adds nothing to your chat context, and the reply is checked before it is shown. If the call fails, times out, is offline, or the reply is unusable, the roster shows each worker's own task text instead and says so. The other commands read local data only. Nothing runs an AI call on its own.
 
 Sample roster:
 
@@ -85,7 +87,13 @@ The settings are optional and have defaults. Change them in `/plugin` → office
 - `examples/office-worker.sh`: writes or updates one worker file safely. Usage: `bash examples/office-worker.sh <id> <working|waiting|blocked|done|failed> "<task>" ["<note>"] ["<scope>"]`
 - `examples/demo.sh`: a 60-second demo with fake workers. Usage: `bash examples/demo.sh`
 
-More commands (customize the Boss, your team and the office) are planned — see the [roadmap issues](https://github.com/rbrtcnkln1/office-space/issues).
+More commands (decorating the office) are planned — see the [roadmap issues](https://github.com/rbrtcnkln1/office-space/issues).
+
+## Make it yours
+
+Four commands change how the office looks: `/office-space-boss` (the Boss), `/office-space-team` (titles, looks and desks), `/office-space-office` (walls, floor and furniture) and `/office-space-theme` (save, share and load all three at once). Each one shows what will change and waits for **Apply**, and the default office draws exactly as it always has until you change something.
+
+![A custom Boss, a renamed and restyled team, a decorated office, and long tasks wrapped under the desks](docs/media/make-it-yours.png)
 
 ## Make the Boss yours
 
@@ -119,6 +127,66 @@ Pick wall colors, floors and furniture from a small catalog of pixel-art pieces:
 
 ![The plain office next to a decorated one](docs/media/office-before-after.png)
 
+## Make the team yours
+
+Rename the roles, restyle them from the same catalog as the Boss, and choose how many desks the office starts with:
+
+```
+/office-space-team call the Coder "Mx. Bytes" and give the Writer a cardigan and a scarf
+/office-space-team start with ten desks
+```
+
+- Run it with no words and the panel asks what to change (a team member or the desk count), which role, which part (title, hair, outfit, accessory), then a few buttons. **Other** takes a role name, a new title, a number, or words read like plain ones.
+- You see what will change and press **Apply** (or **Cancel**) before anything is saved. Kept between sessions. `/office-space-team reset` restores every default and `/office-space-team reset coder` restores one role.
+- Titles are your own text: control characters are removed, they are cut at 14 characters and always drawn as plain text. A part you do not change keeps the role's built-in look. The Boss has its own command.
+- Desks: 5 to 15, in rows of five (5 is the room's smallest layout, so you can only add). It sets the starting size; the room still grows when more workers arrive and never takes a desk away from someone sitting at it. Mapping task words to roles is not part of this command yet.
+- Reading your words (and "Other") makes one small call to a fast model, so it uses a little plan usage. Picking buttons does not. Nothing is added to your conversation.
+
+![The built-in team above, a renamed and restyled team with more desks below](docs/media/team-before-after.png)
+
+## Themes
+
+A theme is your Boss look, team and office in one small file you can keep, share or swap.
+
+```
+/office-space-theme save night-owls         # writes ~/.claude/office-space/themes/night-owls.json
+/office-space-theme load night-owls         # a saved theme, by name
+/office-space-theme load ~/Downloads/x.json # or by path
+/office-space-theme load night shift        # a built-in preset
+/office-space-theme list
+/office-space-theme reset                   # every default back
+```
+
+- Loading always shows what will change and waits for **Apply**. Nothing happens on its own.
+- Three presets ship with the mod: **90s startup**, **cozy library** and **night shift**. They use only catalog parts.
+- A theme file is **data only**. It is checked key by key against the catalog and the team rules: an unknown key, an unknown part, a bad title, a file over 8 KB or anything that is not valid JSON refuses the whole file, and nothing in it is ever run. Only the sections you saved are written; a section a file leaves out is left alone when it loads.
+- Themes use no AI and no plan usage.
+
+Format (version 1):
+
+```json
+{
+  "format": "office-space-theme",
+  "version": 1,
+  "name": "night owls",
+  "boss": { "hair": "short", "hairColor": "black", "outfit": "hoodie", "accessory": "headphones" },
+  "team": {
+    "titles": { "coder": "Night Owl" },
+    "looks": { "coder": { "hairColor": "purple", "outfit": "hoodie" } },
+    "desks": 10
+  },
+  "office": {
+    "wall": "charcoal",
+    "floor": "gray-carpet",
+    "items": { "break": "vending-machine", "bottom-3": "fish-tank" }
+  }
+}
+```
+
+All sections but `format`, `version` and `name` are optional. `boss` needs all four parts; `looks` can name any of `hair`, `hairColor`, `outfit`, `accessory`. `office` is the same decor `/office-space-office` saves: a `wall` and `floor` id and `items` mapping a spot (`break`, `wall-door`, `wall-table`, `wall-cooler`, `bottom-1` to `bottom-5`) to a piece that fits there; a part left out is the plain default. Role ids are `planner`, `researcher`, `coder`, `writer`, `analyst`, `maintainer`, `deployer`, `reviewer`, `skeptic`, `optimist`.
+
+![The three built-in presets](docs/media/theme-presets.png)
+
 ## Updating
 
 New versions reach you when the `version` in `plugin/.claude-plugin/plugin.json` is bumped on `main`; a change without a bump is not delivered to installed copies.
@@ -145,7 +213,7 @@ A Claude Code version that supports plugin hook modules (2.1.29x or newer); olde
 
 ## FAQ
 
-**Does it use my context or tokens?** Not your context: it only draws UI and answers commands as text, with no skills, agents or prompt text, so it adds nothing to Claude's context. The exceptions to "no tokens" are `/office-space-roster`, `/office-space-boss` and `/office-space-office` with words, which spend a little plan usage on one small side request each time you run them (see [Commands](#commands)).
+**Does it use my context or tokens?** Not your context: it only draws UI and answers commands as text, with no skills, agents or prompt text, so it adds nothing to Claude's context. The exceptions to "no tokens" are `/office-space-roster`, and `/office-space-boss`, `/office-space-team` and `/office-space-office` with words, which spend a little plan usage on one small side request each time you run them (see [Commands](#commands)).
 
 **How do I update?** Type `/office-space-update`, or see [Updating](#updating) for the manual and automatic options.
 

@@ -14,6 +14,7 @@ import type { BossLook } from './catalog'
 import { DEFAULT_FLOOR, DEFAULT_WALL, SOUTH_H, floorOf, hasSouth, itemOf, pieceAt, slotOf, wallOf } from './decor'
 import type { Geometry, OfficeLook } from './decor'
 import { FRAMES, DECOR_PAL, floorSvg, itemGrid } from './decorart'
+import type { Team } from './team'
 import { sanitize } from './external'
 import type { RemoteInfo } from './external'
 import { usageTray, usageWall } from './usageart'
@@ -139,7 +140,7 @@ export function wrapLabel(text: string, maxChars = LABEL_CHARS, maxLines = LABEL
   if (cur) lines.push(cur)
   if (lines.length > maxLines) {
     lines.length = maxLines
-    const last = lines[maxLines - 1]
+    const last = lines[maxLines - 1] ?? ''
     lines[maxLines - 1] = (last.length >= maxChars ? last.slice(0, maxChars - 1) : last) + '…'
   }
   return lines
@@ -271,12 +272,26 @@ export class Office {
   bossLook: BossLook | undefined = undefined
   /** The office's decoration (wall, floor, furniture), or none for the plain office. */
   decor: OfficeLook | undefined = undefined
+  /** Team titles, looks and starting desk count (see ./team.ts), or none for the defaults. */
+  team: Team | undefined = undefined
   private initialized = false
 
   constructor() {
     const seat = this.bossSeat()
     this.boss = { pos: seat, facing: 'down', seated: true, plan: [], walkFrame: 0, reaching: false, carrying: false, react: null, reactUntil: 0, ambientUntil: 0, missions: [], errand: false, atStation: false, item: null, sipUntil: 0, idleTicks: 0 }
   }
+
+  /** What a role is called on the floor: the team's title, or the built-in one. */
+  titleOf(role: RoleId): string {
+    return (role !== 'boss' && this.team?.titles[role]) || ROLES[role].title
+  }
+
+  /** Sets the team customization; the desk count follows the layout rules (never yanks an occupied desk). */
+  setTeam(team: Team | undefined) {
+    this.team = team
+    this.layout()
+  }
+  private startDesks() { return Math.max(MIN_DESKS, this.team?.desks ?? 0) }
 
   // ----- geometry -----
   get rows() { return Math.ceil(this.desks.length / this.cols) }
@@ -351,7 +366,7 @@ export class Office {
 
   private layoutMain() {
     const holding = [...this.workers.values()].filter(w => w.desk >= 0 && w.desk < ANNEX).length
-    const want = Math.max(MIN_DESKS, holding + SPARE_DESKS)
+    const want = Math.max(this.startDesks(), holding + SPARE_DESKS)
     const walking = [...this.workers.values()].some(w => w.plan.length) || this.boss.plan.length > 0
     if (want < this.desks.length && walking) return
     if (want === this.desks.length) return
@@ -879,9 +894,10 @@ export class Office {
       }
       // label: status dot + role centred under the desk, the task right below
       const mid = c.x + 32
-      const titleW = role.title.length * 3
+      const title = this.titleOf(here.role)
+      const titleW = title.length * 3
       out.push(`<rect x="${Math.round(mid - titleW / 2 - 5)}" y="${c.y + 31}" width="3" height="3" fill="${this.dot(here)}"/>`)
-      out.push(`<text x="${mid}" y="${c.y + 35}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" font-weight="700" fill="#22304a">${esc(role.title)}</text>`)
+      out.push(`<text x="${mid}" y="${c.y + 35}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" font-weight="700" fill="#22304a">${esc(title)}</text>`)
       const sub = rm?.stale ? `stale ${rm.ageMin}m · ${here.label}` : rm?.need && rm.note ? rm.note : here.label
       wrapLabel(sub).forEach((ln, i) => out.push(`<text x="${mid}" y="${c.y + 41 + i * 5}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="4" fill="${rm?.need && !rm.stale ? '#8e2a20' : '#33445f'}">${esc(ln)}</text>`))
       const seat = this.seatOf(slot)
@@ -962,9 +978,10 @@ export class Office {
     const best = [...this.eotd.entries()].sort((a, b) => b[1] - a[1])[0]
     if (best) {
       const [role, n] = best
-      const face = character({ role, dir: 'down', pose: 'stand', frame: 0 }).slice(0, 10).map(r => r.slice(3, 13))
-      o.push(place(sx + 3, sy + 8, `<g transform="scale(0.8)">${gridSvg(`eotd-${role}`, face, paletteFor(role))}</g>`))
-      o.push(`<text x="${sx + 13}" y="${sy + 12.5}" font-family="ui-monospace,Menlo,monospace" font-size="3" font-weight="700" fill="#22304a">${esc(ROLES[role].title)}</text>`)
+      const look = this.lookOf(role)
+      const face = character({ role, dir: 'down', pose: 'stand', frame: 0, ...(look ? { look } : {}) }).slice(0, 10).map(r => r.slice(3, 13))
+      o.push(place(sx + 3, sy + 8, `<g transform="scale(0.8)">${gridSvg(`eotd-${role}-${lookKey(look)}`, face, paletteFor(role, look))}</g>`))
+      o.push(`<text x="${sx + 13}" y="${sy + 12.5}" font-family="ui-monospace,Menlo,monospace" font-size="3" font-weight="700" fill="#22304a">${esc(this.titleOf(role))}</text>`)
       o.push(`<text x="${sx + 13}" y="${sy + 16}" font-family="ui-monospace,Menlo,monospace" font-size="3" fill="#33445f">${n} handed in</text>`)
     } else {
       o.push(`<text x="${sx + 22}" y="${sy + 14}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="3" fill="#33445f">nobody yet</text>`)
@@ -1029,8 +1046,13 @@ export class Office {
     return out
   }
 
+  /** The look a role draws with: the Boss's, a team member's (parts only), or none. */
+  private lookOf(role: RoleId): Partial<BossLook> | undefined {
+    return role === 'boss' ? this.bossLook : this.team?.looks[role]
+  }
+
   private charSvg(role: RoleId, dir: Dir, pose: 'stand' | 'walk' | 'seat' | 'reach' | 'lounge', frame: number, typing: boolean, blink: boolean, nod: boolean, pos: Pt): string {
-    const look = role === 'boss' ? this.bossLook : undefined
+    const look = this.lookOf(role)
     const key = `c-${role}-${dir}-${pose}-${frame}-${typing}-${blink}-${nod}-${lookKey(look)}`
     return place(pos.x, pos.y, gridSvg(key, character({ role, dir, pose, frame, typing, blink, nod, ...(look ? { look } : {}) }), paletteFor(role, look)))
   }
@@ -1063,7 +1085,7 @@ export class Office {
   }
 
   textLines(): Array<{ dot: string; title: string; label: string }> {
-    return [...this.workers.values()].map(w => ({ dot: this.dot(w), title: ROLES[w.role].title, label: w.remote ? this.remoteLabel(w, w.remote) : w.label }))
+    return [...this.workers.values()].map(w => ({ dot: this.dot(w), title: this.titleOf(w.role), label: w.remote ? this.remoteLabel(w, w.remote) : w.label }))
   }
 
   /** External workers waiting on a human right now (fresh, not leaving): what a press shows. */
@@ -1072,7 +1094,7 @@ export class Office {
     for (const w of this.workers.values()) {
       const r = w.remote
       if (!r?.need || r.stale || w.ending) continue
-      out.push({ id: w.id, who: w.name || ROLES[w.role].title, dot: this.dot(w), need: r.need, source: r.source, task: w.label, ...(r.note ? { note: r.note } : {}), ...(r.url ? { url: r.url } : {}) })
+      out.push({ id: w.id, who: w.name || this.titleOf(w.role), dot: this.dot(w), need: r.need, source: r.source, task: w.label, ...(r.note ? { note: r.note } : {}), ...(r.url ? { url: r.url } : {}) })
     }
     return out
   }

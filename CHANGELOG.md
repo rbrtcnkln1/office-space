@@ -2,6 +2,9 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## Unreleased
+- Fix: `/office-space-recap` missed background agents that started and finished between two 5-second looks, so busy days showed 0 hand-ins. Agents first seen already completed or failed now count (the first look after loading is only a baseline, so earlier work is not recounted).
+
 ## 0.11.0 — 2026-10-11
 Make the Boss yours.
 - New `/office-space-boss`: change the Boss's hair style, hair color, outfit and accessory. Type what you want in plain words, or pick step by step with buttons in the Office Space panel. You see what will change and press Apply before anything is saved. `reset` brings the default back, and your look is kept between sessions.

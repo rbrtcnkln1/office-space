@@ -165,6 +165,7 @@ export class DayTracker {
   key = ''
   log: DayLog = emptyDay()
   private prev = new Map<string, { status: string; need: boolean }>()
+  private primed = false // the first look is a baseline: agents already finished then are not today's news
 
   /** Start (or switch to) a day. A new key resets the tally; the same key keeps it. */
   rollover(key: string, saved: unknown): boolean {
@@ -183,7 +184,10 @@ export class DayTracker {
       const who = clip(sanitize(a.name || '') || sanitize(a.description || '') || sanitize(a.type || '') || a.id, 40)
       const need = !!a.remote?.need && !a.remote.stale
       const p = this.prev.get(a.id)
-      if (p && ACTIVE_NOW.has(p.status) && !ACTIVE_NOW.has(a.status)) {
+      // An agent that started and ended between two looks is first seen already
+      // ended: it still counts (once primed), or quick background agents vanish.
+      const wasActive = p ? ACTIVE_NOW.has(p.status) : this.primed && (a.status === 'completed' || a.status === 'failed')
+      if (wasActive && !ACTIVE_NOW.has(a.status)) {
         if (a.status === 'failed') {
           this.log.failed++
           if (this.log.failures.length < LIST_CAP) this.log.failures.push({ who, task: clip(sanitize(a.description || ''), 80) })
@@ -203,6 +207,7 @@ export class DayTracker {
       this.prev.set(a.id, { status: a.status, need })
     }
     for (const id of [...this.prev.keys()]) if (!seen.has(id)) this.prev.delete(id)
+    this.primed = true
     return changed
   }
 }

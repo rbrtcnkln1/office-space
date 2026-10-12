@@ -2,6 +2,12 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## Unreleased
+- New `/office-space-office`: decorate the office. Pick from 9 wall colors, 8 floors, a vending machine, arcade cabinet, couch, potted fern, cactus, lava lamp, fish tank and 4 posters, in plain words or step by step with buttons in the Office Space panel. You see what will change and press Apply before anything is saved; the decor is kept between sessions. `remove <piece>`, `list` and `reset` need no AI call. Pieces only go where nobody walks, and the default office draws exactly as before.
+- Workers now visit a vending machine on their breaks (when you add one) and carry back a soda, donut or cookie.
+- Describing the decor in words (or choosing Other) makes one small side request to a model, which uses a little plan usage; the reply is checked against the catalog before it is shown. Nothing is added to your conversation.
+- The step-by-step choice screen is now shared by `/office-space-boss` and `/office-space-office`.
+
 ## 0.11.0 — 2026-10-11
 Make the Boss yours.
 - New `/office-space-boss`: change the Boss's hair style, hair color, outfit and accessory. Type what you want in plain words, or pick step by step with buttons in the Office Space panel. You see what will change and press Apply before anything is saved. `reset` brings the default back, and your look is kept between sessions.

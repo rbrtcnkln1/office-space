@@ -10,6 +10,9 @@ import {
   DEFAULT_LOOK, FEATURED, SLOTS, SLOT_NAMES, catalogForPrompt, changeLines, exactId, isSlot, labelOf, optionsText, parseLookPatch, sameLook,
 } from './catalog'
 import type { BossLook, Slot } from './catalog'
+import type { Action, FlowView, Option } from './flow'
+
+export type { Action, Option }
 
 export const MAX_WORDS = 200
 const MAX_UNKNOWN = 5
@@ -34,13 +37,6 @@ export type Flow = {
   notes: string[] // things to tell the user (not in the catalog, offline, ...)
   busy: boolean // an AI call is running
 }
-
-export type Action =
-  | { kind: 'choose'; id: string } // one of the offered options
-  | { kind: 'other'; text: string } // free text, through the same AI path as plain words
-  | { kind: 'apply' }
-  | { kind: 'restart' }
-  | { kind: 'cancel' }
 
 /** Either a finished answer (`text`, maybe a new `look`) or a flow for the panel to keep drawing. */
 export type Outcome = { text: string; look?: BossLook; flow?: undefined } | { flow: Flow; text?: undefined; look?: undefined }
@@ -131,8 +127,6 @@ function notInCatalog(unknown: Interpretation['unknown']): string {
 
 // ----- the options of one step -----
 
-export type Option = { id: string; label: string }
-
 /** What a step offers: keep the current, then a few featured picks (2 to 4; "Other" is its own field). */
 export function stepOptions(slot: Slot, draft: BossLook): Option[] {
   const out: Option[] = [{ id: draft[slot], label: `Keep ${labelOf(slot, draft[slot])}` }]
@@ -152,6 +146,18 @@ export const STEP_QUESTIONS: Record<Slot, string> = {
 
 export function summaryLines(f: Flow): string[] {
   return changeLines(f.from, f.draft)
+}
+
+/** What the panel draws for this flow (the shared stepped view, see ./flow.ts). */
+export function bossView(f: Flow): FlowView | null {
+  const base = { id: 'boss', title: 'Boss look', busy: f.busy, notes: f.notes }
+  if (f.stage === 'confirm') return { ...base, stage: 'confirm', heading: 'Boss look: apply this change?', stepKey: 'confirm', options: [], other: false, summary: summaryLines(f) }
+  const slot = f.slots[f.i]
+  if (!slot) return null
+  return {
+    ...base, stage: 'pick', heading: `Boss look (${f.i + 1} of ${f.slots.length}): ${STEP_QUESTIONS[slot]}`,
+    stepKey: slot, options: stepOptions(slot, f.draft), other: true, summary: [],
+  }
 }
 
 // ----- starting -----

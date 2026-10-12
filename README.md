@@ -35,6 +35,7 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 | `/office-space-help` | List every Office Space command and setting |
 | `/office-space-update` | Check GitHub for a newer version and update to it (see [Updating](#updating)) |
 | `/office-space-boss` | Change how the Boss looks in plain words or step by step, or `reset` (see [Make the Boss yours](#make-the-boss-yours)) |
+| `/office-space-office` | Decorate the office: wall color, floor, a vending machine, arcade cabinet, couch and more, in plain words or step by step, plus `remove <piece>`, `list` and `reset` (see [Decorate the office](#decorate-the-office)) |
 | `/office-space-feedback` | Shows the link to report a bug or share an idea, plus your version details to paste in |
 | `/office-space-roster` | Who is at work right now (subagents and outside workers), how long they have been at it, and a one-line summary of what each is doing. Uses a little plan usage (see below) |
 | `/office-space-recap` | Today's hand-ins, failures, outside workers that needed a person, and the Employee of the Day |
@@ -43,7 +44,7 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 
 Type `/office-space` in the prompt and the menu lists all of them. The older `/office-space band` still works.
 
-**Which commands use plan usage?** Only `/office-space-roster` and, when you describe a look in words, `/office-space-boss` (the step-by-step choice uses none). Each roster run makes one small-model request (Haiku, low effort, a few hundred tokens) that sends every worker's task and recent steps and gets one-line summaries back. It happens outside your conversation, so it adds nothing to your chat context, and the reply is checked before it is shown. If the call fails, times out, is offline, or the reply is unusable, the roster shows each worker's own task text instead and says so. The other commands read local data only. Nothing runs an AI call on its own.
+**Which commands use plan usage?** Only `/office-space-roster` and, when you describe something in words, `/office-space-boss` and `/office-space-office` (the step-by-step choices, `list`, `remove <piece>` and `reset` use none). Each roster run makes one small-model request (Haiku, low effort, a few hundred tokens) that sends every worker's task and recent steps and gets one-line summaries back. It happens outside your conversation, so it adds nothing to your chat context, and the reply is checked before it is shown. If the call fails, times out, is offline, or the reply is unusable, the roster shows each worker's own task text instead and says so. The other commands read local data only. Nothing runs an AI call on its own.
 
 Sample roster:
 
@@ -101,6 +102,23 @@ Give the Boss a new look, from a small catalog of pixel-art hair styles, hair co
 
 ![The default Boss next to a customized one](docs/media/boss-before-after.png)
 
+## Decorate the office
+
+Pick wall colors, floors and furniture from a small catalog of pixel-art pieces:
+
+```
+/office-space-office teal walls, a vending machine and an arcade cabinet
+```
+
+- **Catalog:** 9 wall colors, 8 floors (tiles, checkerboards, wood planks and carpets), and a vending machine, arcade cabinet, couch, potted fern, cactus, lava lamp, fish tank and 4 posters. `/office-space-office list` shows them all.
+- **Where things go:** posters hang on the back wall, the vending machine has its own spot in the break area, and everything else stands along a strip added under the last row of desks, so nothing blocks an aisle, a desk, the door or the break area.
+- **The vending machine works:** workers walk over on breaks and come back with a soda, a donut or a cookie.
+- Run it with no words and the panel asks what to change (add furniture, wall color, floor, or remove a piece), then which one, then where. **Other** takes your own words, read the same way as a plain-words command. You see what will change and press **Apply** (or **Cancel**) before anything is saved; it is kept between sessions.
+- `/office-space-office remove couch` takes a piece out, `/office-space-office reset` restores the plain office. If you ask for something the catalog does not have, such as a hot tub, the reply says so and lists the closest options.
+- Reading your words (and "Other") makes one small call to a fast model, so it uses a little of your plan usage. Buttons, `list`, `remove <piece>` and `reset` do not. Nothing is added to your conversation.
+
+![The plain office next to a decorated one](docs/media/office-before-after.png)
+
 ## Updating
 
 New versions reach you when the `version` in `plugin/.claude-plugin/plugin.json` is bumped on `main`; a change without a bump is not delivered to installed copies.
@@ -127,7 +145,7 @@ A Claude Code version that supports plugin hook modules (2.1.29x or newer); olde
 
 ## FAQ
 
-**Does it use my context or tokens?** Not your context: it only draws UI and answers commands as text, with no skills, agents or prompt text, so it adds nothing to Claude's context. The exceptions to "no tokens" are `/office-space-roster` and `/office-space-boss` with words, which spend a little plan usage on one small side request each time you run them (see [Commands](#commands)).
+**Does it use my context or tokens?** Not your context: it only draws UI and answers commands as text, with no skills, agents or prompt text, so it adds nothing to Claude's context. The exceptions to "no tokens" are `/office-space-roster`, `/office-space-boss` and `/office-space-office` with words, which spend a little plan usage on one small side request each time you run them (see [Commands](#commands)).
 
 **How do I update?** Type `/office-space-update`, or see [Updating](#updating) for the manual and automatic options.
 

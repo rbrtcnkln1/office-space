@@ -23,3 +23,5 @@ To change a scene, edit `frames.ts` (the story and the captions) or the per-scen
 The README's promo thumbnail (`docs/media/teaser-thumbnail.png`) is made by `thumbnail.py`: `python3 scripts/media/thumbnail.py WORK_DIR` takes one `remote-crew` frame from `frames.ts` output, scales it 2x with nearest-neighbour, darkens it and adds the pixel-style title, play button and duration badge. It is not part of `build.sh`.
 
 The usage still in the README (`docs/media/usage-board.png`) comes from `usage-still.ts`: `bun scripts/media/usage-still.ts out.svg && rsvg-convert out.svg -o docs/media/usage-board.png`.
+
+The drawn-parts still (`docs/media/drawn-parts.png`) comes from `parts-still.ts` and `parts-sheet.py`, using the example drawings in `examples/drawn-parts.json`: `bun scripts/media/parts-still.ts OUT_DIR && python3 scripts/media/parts-sheet.py OUT_DIR docs/media/drawn-parts.png`.

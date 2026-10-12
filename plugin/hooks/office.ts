@@ -11,6 +11,8 @@ import {
 } from './sprites'
 import type { Dir, Grid, Palette, RoleId } from './sprites'
 import type { BossLook } from './catalog'
+import { resolveParts } from './parts'
+import type { CustomPart, ResolvedParts } from './parts'
 import { DEFAULT_FLOOR, DEFAULT_WALL, SOUTH_H, floorOf, hasSouth, itemOf, pieceAt, slotOf, wallOf } from './decor'
 import type { Geometry, OfficeLook } from './decor'
 import { FRAMES, DECOR_PAL, floorSvg, itemGrid } from './decorart'
@@ -274,6 +276,8 @@ export class Office {
   decor: OfficeLook | undefined = undefined
   /** Team titles, looks and starting desk count (see ./team.ts), or none for the defaults. */
   team: Team | undefined = undefined
+  /** The user's drawn parts (./parts.ts), by id; looks name them, this holds their grids. */
+  partLib: ReadonlyMap<string, CustomPart> = new Map()
   private initialized = false
 
   constructor() {
@@ -979,7 +983,8 @@ export class Office {
     if (best) {
       const [role, n] = best
       const look = this.lookOf(role)
-      const face = character({ role, dir: 'down', pose: 'stand', frame: 0, ...(look ? { look } : {}) }).slice(0, 10).map(r => r.slice(3, 13))
+      const parts = resolveParts(look?.parts, this.partLib)
+      const face = character({ role, dir: 'down', pose: 'stand', frame: 0, ...(look ? { look } : {}), ...(parts ? { parts } : {}) }).slice(0, 10).map(r => r.slice(3, 13))
       o.push(place(sx + 3, sy + 8, `<g transform="scale(0.8)">${gridSvg(`eotd-${role}-${lookKey(look)}`, face, paletteFor(role, look))}</g>`))
       o.push(`<text x="${sx + 13}" y="${sy + 12.5}" font-family="ui-monospace,Menlo,monospace" font-size="3" font-weight="700" fill="#22304a">${esc(this.titleOf(role))}</text>`)
       o.push(`<text x="${sx + 13}" y="${sy + 16}" font-family="ui-monospace,Menlo,monospace" font-size="3" fill="#33445f">${n} handed in</text>`)
@@ -1054,7 +1059,8 @@ export class Office {
   private charSvg(role: RoleId, dir: Dir, pose: 'stand' | 'walk' | 'seat' | 'reach' | 'lounge', frame: number, typing: boolean, blink: boolean, nod: boolean, pos: Pt): string {
     const look = this.lookOf(role)
     const key = `c-${role}-${dir}-${pose}-${frame}-${typing}-${blink}-${nod}-${lookKey(look)}`
-    return place(pos.x, pos.y, gridSvg(key, character({ role, dir, pose, frame, typing, blink, nod, ...(look ? { look } : {}) }), paletteFor(role, look)))
+    const parts = resolveParts(look?.parts, this.partLib)
+    return place(pos.x, pos.y, gridSvg(key, character({ role, dir, pose, frame, typing, blink, nod, ...(look ? { look } : {}), ...(parts ? { parts } : {}) }), paletteFor(role, look)))
   }
 
   dot(w: Worker): string {
@@ -1103,4 +1109,23 @@ export class Office {
     const tail = r.stale ? ` (stale ${r.ageMin}m)` : r.need ? ` — ${r.need.toUpperCase()}${r.note ? `: ${r.note}` : ''}` : ''
     return `[${r.source}] ${w.label}${tail}`
   }
+}
+
+/**
+ * Characters standing side by side on a floor tile, front view, for the
+ * drawn-part preview in the panel (before and after). Each figure's parts are
+ * passed already resolved, so a part not yet kept can be shown.
+ */
+export function portraitSvg(figures: { role: RoleId; look?: Partial<BossLook>; parts?: ResolvedParts }[], scale = 8, floor = '#6b7a8f'): string {
+  const gap = 6
+  const W = figures.length * (16 + gap) + gap
+  const H = 28
+  const out: string[] = [`<rect width="${W}" height="${H}" fill="${floor}"/>`]
+  figures.forEach((f, i) => {
+    const g = character({ role: f.role, dir: 'down', pose: 'stand', frame: 0, ...(f.look ? { look: f.look } : {}), ...(f.parts ? { parts: f.parts } : {}) })
+    const key = `portrait-${f.role}-${lookKey(f.look)}-${hash(JSON.stringify(f.parts ?? {}))}`
+    out.push(`<ellipse cx="${gap + i * (16 + gap) + 8}" cy="${H - 6}" rx="6" ry="1.5" fill="#000" opacity="0.2"/>`)
+    out.push(place(gap + i * (16 + gap), 2, gridSvg(key, g, paletteFor(f.role, f.look))))
+  })
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W * scale}" height="${H * scale}" shape-rendering="crispEdges" style="image-rendering:pixelated">${out.join('')}</svg>`
 }

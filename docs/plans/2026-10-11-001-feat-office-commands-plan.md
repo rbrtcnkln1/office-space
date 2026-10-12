@@ -118,3 +118,13 @@ Covers R8, R12, R13 (Boss), R14-R18, R20.
 - **Catalog:** `plugin/hooks/catalog.ts` (ids, labels, colors, validation, closest-options text) is pure and shared by the later team/office/theme commands; the art is drawn by `character()` in `sprites.ts`.
 - **Persistence:** `$.store` key `bossLook`, read on `session.start`, cleared by `/office-space-boss reset`.
 - **Confirmation:** every change, from words or steps, shows its summary with Apply, Start over and Cancel; only Apply saves.
+
+## Wave 2, slice 2: `/office-space-team` and `/office-space-theme` (resolved)
+
+Covers R9, R11, R13 (team, theme), R14-R20.
+
+- **Team data** (`plugin/hooks/team.ts`, pure): `{ titles, looks, desks }` keyed by role id. A look is a partial of the Boss's four catalog ids, so a part left out keeps the role's built-in look; `character()` and `paletteFor()` now accept a partial look for any role. Titles go through `sanitize()` and are capped at 14 characters; the renderer escapes them. Persisted in `$.store` key `team`, cleared by `reset`.
+- **Desks:** 5 to 15, rounded up to full rows of five by the existing layout rules (`Office.startDesks`); an occupied desk is never removed. Mapping words in agent tasks to roles was skipped: the role rules are regexes in `sprites.ts` and a per-user mapping needs its own design.
+- **Panel:** the Boss's panel code became a generic `choiceView` used by Boss, team and theme. Team steps: what -> role -> part -> choice(s) -> summary -> Apply; "Other" takes an exact role, title or number with no AI call, and anything else goes through the same validated haiku call as plain words.
+- **Themes** (`plugin/hooks/theme.ts`): `{ format, version, name, boss?, team?, office? }`, strict whitelist validation, 8 KB cap, saved under `~/.claude/office-space/themes/<slug>.json`, loaded by name or path, confirmed with the same Apply summary. Three presets use only catalog ids.
+- **Office section is a stand-in.** `validateOffice()` in `theme.ts` accepts only a flat object of short ids and small numbers and is stored under `officeLook`; swap it for the office command's validator and store key when `/office-space-office` lands.

@@ -12,6 +12,9 @@
 //   /office-space-recap    today's hand-ins, failures and calls for a person
 //   /office-space-usage    context fill, plan limits and cost
 //   /office-space-workers  the outside-workers folder, what was read, what was skipped
+//   /office-space-boss     change how the Boss looks
+//   /office-space-team     rename roles, restyle them, set the starting desks
+//   /office-space-theme    save, load and reset a whole look (Boss, team, office)
 // Each command is one row of COMMANDS below.
 //
 // Work running outside the session appears too: any script can drop one JSON
@@ -28,6 +31,10 @@ import { BOSS_HELP, IN_PANEL, STEP_QUESTIONS, actBoss, startBoss, stepOptions, s
 import type { Action, BossIo, Flow, Outcome as BossOutcome } from './boss'
 import { DEFAULT_LOOK, sanitizeLook } from './catalog'
 import type { BossLook } from './catalog'
+import { TEAM_HELP, TEAM_IN_PANEL, actTeam, isEmptyTeam, sanitizeTeam, startTeam, teamStep, teamSummary } from './team'
+import type { Team, TeamFlow, TeamOutcome } from './team'
+import { MAX_THEME_BYTES, THEME_HELP, PRESETS, currentTheme, findPreset, parseTheme, resetTheme, slug, themeChangesNothing, themeLines, themeToJson, validName, validateOffice } from './theme'
+import type { Current, OfficeSection, Theme } from './theme'
 import type { AgentLike } from './office'
 import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, classifyWorker, expandDir, inScope, alertText, isWorkerFile, newlyNeeding, normalizePath, parseWorker, toAgents } from './external'
 import type { ExternalWorker } from './external'
@@ -43,6 +50,9 @@ const selected = atom({ plugin: 'office-space', key: 'selected' } as const, '') 
 const PANE = 'office-space'
 const STORE_BAND = 'band'
 const STORE_BOSS = 'bossLook'
+const STORE_TEAM = 'team'
+const STORE_OFFICE = 'officeLook' // the office section of a theme (kept as validated data until the room is decorated from it)
+const THEMES_DIR = '.claude/office-space/themes' // under $HOME
 const BOSS_MODEL = 'haiku' // the smallest, fastest model: one short side call
 const STORE_UPDATE_CHECKED = 'updateChecked'
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -67,6 +77,11 @@ const PANE_SCALE = 4 // drawn large; the panel shrinks it to fit its width
 let office = new Office()
 let bossFlow: Flow | null = null // the Boss look being chosen; drawn as buttons in the panel
 let bossLook: BossLook | undefined // saved Boss customization; undefined draws the default
+let teamFlow: TeamFlow | null = null // the team change being chosen
+let team: Team | undefined // saved team titles, looks and starting desks; undefined draws the defaults
+type ThemeFlow = { theme: Theme; lines: string[]; busy: boolean }
+let themeFlow: ThemeFlow | null = null // a theme waiting for Apply
+let officeSection: OfficeSection | undefined // the office part of the last theme applied
 let timer: { cancel: () => void } | null = null
 let lastStep = 0 // ms of the last simulation step (from any driver)
 let paneOpen = false
@@ -337,6 +352,7 @@ async function setOpen($: EngineInterface, on: boolean) {
     applyUsage()
     void refreshUsage($)
     office.bossLook = bossLook
+    office.setTeam(team)
     externalAt = 0
     resolvedDir = null
     await loadEotd($)
@@ -351,7 +367,7 @@ async function setOpen($: EngineInterface, on: boolean) {
 type Reply = { text: string }
 // A row decides what to do; the dispatcher below does it. Rows stay pure because
 // a module may not hand `$` to a function it looks up at run time.
-type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' | 'roster' | 'recap' | 'usage' | 'workers' } | { boss: string }
+type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' | 'roster' | 'recap' | 'usage' | 'workers' } | { boss: string } | { team: string } | { theme: string }
 type Command = {
   name: string
   description: string
@@ -480,6 +496,18 @@ export const COMMANDS: Command[] = [
     description: 'Change how the Boss looks, in plain words or step by step (uses a little plan usage)',
     argumentHint: '[pink spiky hair, headphones | reset]',
     run: (args) => ({ boss: args }),
+  },
+  {
+    name: 'office-space-team',
+    description: 'Rename roles, restyle them and set the starting desk count, in words or step by step (uses a little plan usage)',
+    argumentHint: '[call the Coder "Mx. Bytes" | reset [role]]',
+    run: (args) => ({ team: args }),
+  },
+  {
+    name: 'office-space-theme',
+    description: 'Save, load, list or reset a whole look (Boss, team, office); includes three presets (no plan usage)',
+    argumentHint: '[save <name> | load <name or path> | list | reset]',
+    run: (args) => ({ theme: args }),
   },
 ]
 
@@ -636,6 +664,8 @@ function bossIo($: EngineInterface): BossIo {
  */
 function takeBoss($: EngineInterface, r: BossOutcome): string | null {
   if (r.flow) {
+    teamFlow = null
+    themeFlow = null
     bossFlow = r.flow
     $.ui.invalidate('ui.render')
     return null
@@ -652,6 +682,8 @@ function takeBoss($: EngineInterface, r: BossOutcome): string | null {
 
 async function runBoss($: EngineInterface, args: string): Promise<Reply> {
   try {
+    teamFlow = null
+    themeFlow = null
     const r = await startBoss(args, bossIo($))
     const text = takeBoss($, r)
     if (text !== null) return { text }
@@ -685,40 +717,277 @@ function pressBoss($: EngineInterface, a: Action) {
   })()
 }
 
-/** The Boss steps as buttons (and a text field for "Other" where the surface has one). */
-function bossView($: EngineInterface, e: RenderInput) {
-  const f = bossFlow
-  if (!f) return null
+/** Wire the team flow to this plugin's `$`: the same small side call, and the saved team. */
+function teamIo($: EngineInterface) {
+  return {
+    complete: async (system: string, prompt: string) => {
+      const r = await $.model.complete({ model: BOSS_MODEL, system, prompt, maxTokens: 400, effort: 'low', timeoutMs: MODEL_TIMEOUT_MS })
+      return r.isAnswered ? r.text : null
+    },
+    load: async () => sanitizeTeam(await $.store.get(STORE_TEAM)),
+    save: async (t: Team | null) => { await $.store.set(STORE_TEAM, t) },
+  }
+}
+
+function setTeam(t: Team | undefined) {
+  team = t && !isEmptyTeam(t) ? t : undefined
+  office.setTeam(team)
+}
+
+function takeTeam($: EngineInterface, r: TeamOutcome): string | null {
+  if (r.flow) {
+    bossFlow = null
+    themeFlow = null
+    teamFlow = r.flow
+    $.ui.invalidate('ui.render')
+    return null
+  }
+  teamFlow = null
+  if (r.team) setTeam(r.team)
+  $.ui.invalidate('ui.render')
+  return r.text
+}
+
+async function showPanel($: EngineInterface) {
+  if (!(await paneShowing($))) {
+    await setOpen($, true)
+    await openPane($)
+  }
+}
+
+async function runTeam($: EngineInterface, args: string): Promise<Reply> {
+  try {
+    bossFlow = null
+    themeFlow = null
+    const text = takeTeam($, await startTeam(args, teamIo($)))
+    if (text !== null) return { text }
+    await showPanel($)
+    return { text: TEAM_IN_PANEL }
+  } catch {
+    return { text: TEAM_HELP }
+  }
+}
+
+/** A button or typed answer in the panel's team steps. */
+function pressTeam($: EngineInterface, a: Action) {
+  const f = teamFlow
+  if (!f || f.busy) return
+  void (async () => {
+    try {
+      if (a.kind === 'other') {
+        teamFlow = { ...f, busy: true }
+        $.ui.invalidate('ui.render')
+      }
+      const text = takeTeam($, await actTeam(f, a, teamIo($)))
+      if (text !== null) $.ui.toast(text.split('\n')[0] as string)
+    } catch {
+      teamFlow = null
+      $.ui.invalidate('ui.render')
+    }
+  })()
+}
+
+// ----- themes -----
+
+/** Reads the saved Boss look, team and office section back from the store (what a theme starts from). */
+async function loadSaved($: EngineInterface) {
+  try {
+    const saved = await $.store.get(STORE_BOSS)
+    bossLook = saved === undefined || saved === null ? undefined : sanitizeLook(saved)
+    office.bossLook = bossLook
+  } catch {}
+  try { setTeam(sanitizeTeam(await $.store.get(STORE_TEAM))) } catch {}
+  try { const o = await $.store.get(STORE_OFFICE); officeSection = o ? validateOffice(o) ?? undefined : undefined } catch {}
+}
+
+const current = (): Current => ({ boss: bossLook ?? { ...DEFAULT_LOOK }, team: team ?? { titles: {}, looks: {} }, ...(officeSection ? { office: officeSection } : {}) })
+
+async function themesDir($: EngineInterface): Promise<string | null> {
+  try {
+    const home = await $.env.get('HOME')
+    return home ? `${home.replace(/\/+$/, '')}/${THEMES_DIR}` : null
+  } catch { return null }
+}
+
+async function listThemes($: EngineInterface): Promise<string> {
+  const lines = ['Built-in presets:', ...PRESETS.map((p) => `  ${p.name}`)]
+  const dir = await themesDir($)
+  let saved: string[] = []
+  try { if (dir) saved = (await $.fs.list(dir)).filter((f) => f.kind === 'file' && !f.isLink && f.name.endsWith('.json')).map((f) => f.name.slice(0, -5)).slice(0, 50) } catch {}
+  lines.push('', saved.length ? `Your saved themes (${dir}):` : `No saved themes yet${dir ? ` (they go in ${dir})` : ''}.`, ...saved.map((n) => `  ${n}`))
+  return lines.join('\n')
+}
+
+/** Show what a theme will change and wait for Apply (R16). */
+async function offerTheme($: EngineInterface, theme: Theme): Promise<Reply> {
+  const lines = themeLines(current(), theme)
+  if (themeChangesNothing(current(), theme) || !lines.length) return { text: `"${theme.name}" is how the office already looks, so nothing changed.` }
+  bossFlow = null
+  teamFlow = null
+  themeFlow = { theme, lines, busy: false }
+  $.ui.invalidate('ui.render')
+  await showPanel($)
+  return { text: `Review the "${theme.name}" theme in the Office Space panel. Nothing changes until you press Apply.` }
+}
+
+async function runTheme($: EngineInterface, raw: string): Promise<Reply> {
+  try {
+    await loadSaved($)
+    const args = raw.replace(/\s+/g, ' ').trim()
+    const [verb = '', ...restWords] = args.split(' ')
+    const rest = restWords.join(' ').trim()
+    const v = verb.toLowerCase()
+    if (!args || v === 'help' || v === '?') return { text: `${THEME_HELP}\n\n${await listThemes($)}` }
+    if (v === 'list') return { text: await listThemes($) }
+    if (v === 'reset' || v === 'default') return offerTheme($, resetTheme())
+    if (v === 'save') {
+      if (!validName(rest)) return { text: 'Give the theme a short plain name, for example: /office-space-theme save night-owls' }
+      const dir = await themesDir($)
+      if (!dir) return { text: 'I could not find your home folder, so nothing was saved.' }
+      const file = slug(rest) || 'theme'
+      const path = `${dir}/${file}.json`
+      let existed = false
+      try { existed = await $.fs.exists(path) } catch {}
+      await $.fs.write(path, themeToJson(currentTheme(rest, current())))
+      return { text: `Saved ${existed ? '(replacing the earlier file) ' : ''}to ${path}. Share it, or load it later with /office-space-theme load ${file}.` }
+    }
+    const name = v === 'load' ? rest : args
+    if (!name) return { text: 'Which theme? Try /office-space-theme list.' }
+    const preset = findPreset(name)
+    if (preset) return offerTheme($, preset)
+    const isPath = name.includes('/') || name.startsWith('~') || name.toLowerCase().endsWith('.json')
+    let path: string
+    if (isPath) {
+      path = expandDir(name, await $.env.get('HOME'))
+    } else {
+      const dir = await themesDir($)
+      if (!dir) return { text: 'I could not find your home folder, so nothing was loaded.' }
+      path = `${dir}/${slug(name) || 'theme'}.json`
+    }
+    let text: unknown
+    try {
+      const st = await $.fs.stat(path)
+      if (st.kind !== 'file') return { text: `That is not a theme file (${path}). Nothing changed.` }
+      if (st.size > MAX_THEME_BYTES) return { text: `Could not load it: the file is too big (over ${MAX_THEME_BYTES} bytes). Nothing changed.` }
+      text = await $.fs.read(path)
+    } catch {
+      return { text: `I could not find or read a theme at ${path}. Try /office-space-theme list. Nothing changed.` }
+    }
+    const parsed = parseTheme(text)
+    if ('error' in parsed) return { text: `Could not load that theme: ${parsed.error}. Nothing changed.` }
+    return offerTheme($, parsed.theme)
+  } catch {
+    return { text: THEME_HELP }
+  }
+}
+
+/** A button in the panel's theme confirmation. */
+function pressTheme($: EngineInterface, a: Action) {
+  const f = themeFlow
+  if (!f || f.busy) return
+  if (a.kind === 'cancel') {
+    themeFlow = null
+    $.ui.invalidate('ui.render')
+    $.ui.toast('Okay, nothing changed.')
+    return
+  }
+  if (a.kind !== 'apply') return
+  themeFlow = { ...f, busy: true }
+  void (async () => {
+    try {
+      const t = f.theme
+      if (t.boss) {
+        const d = t.boss
+        const isDefault = d.hair === DEFAULT_LOOK.hair && d.hairColor === DEFAULT_LOOK.hairColor && d.outfit === DEFAULT_LOOK.outfit && d.accessory === DEFAULT_LOOK.accessory
+        bossLook = isDefault ? undefined : d
+        office.bossLook = bossLook
+        try { await $.store.set(STORE_BOSS, isDefault ? null : d) } catch {}
+      }
+      if (t.team) {
+        setTeam(t.team)
+        try { await $.store.set(STORE_TEAM, team ?? null) } catch {}
+      }
+      if (t.office) {
+        officeSection = Object.keys(t.office).length ? t.office : undefined
+        try { await $.store.set(STORE_OFFICE, officeSection ?? null) } catch {}
+      }
+      $.ui.toast(`Theme "${t.name}" applied.`)
+    } catch {}
+    themeFlow = null
+    $.ui.invalidate('ui.render')
+  })()
+}
+
+/** One panel of choices, for any of the customization commands. */
+type PanelView = {
+  heading: string
+  prefix: string // keys: `${prefix}-${stepKey}-${optionId}`, `${prefix}-other-${stepKey}`, `${prefix}-apply`
+  busy: boolean
+  notes: string[]
+  confirm?: string[] // the lines of the change, when asking to apply
+  step?: { title: string; stepKey: string; options: { id: string; label: string }[]; other?: string }
+  restart?: boolean
+  act: (a: Action) => void
+}
+
+/** The steps as buttons (and a text field for "Other" where the surface has one). */
+function choiceView($: EngineInterface, e: RenderInput, p: PanelView) {
   const t = $.ui.resolve(e)
   const { Box, Text, Button } = t
   const Input = 'Input' in t ? t.Input : null
-  const note = f.notes.length ? <Text dimColor>{f.notes.join(' ')}</Text> : null
-  if (f.busy) return <Box flexDirection="column"><Text bold>Boss look</Text><Text dimColor>Asking the AI...</Text></Box>
-  if (f.stage === 'confirm') {
+  const note = p.notes.length ? <Text dimColor>{p.notes.join(' ')}</Text> : null
+  const k = p.prefix
+  if (p.busy) return <Box flexDirection="column"><Text bold>{p.heading}</Text><Text dimColor>Asking the AI...</Text></Box>
+  if (p.confirm) {
     return (
       <Box flexDirection="column">
-        <Text bold>Boss look: apply this change?</Text>
-        {summaryLines(f).map((l, i) => <Text key={`bl${i}`}>{l}</Text>)}
+        <Text bold>{`${p.heading}: apply this change?`}</Text>
+        {p.confirm.map((l, i) => <Text key={`${k}l${i}`}>{l}</Text>)}
         {note}
-        <Button key="boss-apply" label="Apply" onPress={() => pressBoss($, { kind: 'apply' })} />
-        <Button key="boss-restart" label="Start over" onPress={() => pressBoss($, { kind: 'restart' })} />
-        <Button key="boss-cancel" label="Cancel" onPress={() => pressBoss($, { kind: 'cancel' })} />
+        <Button key={`${k}-apply`} label="Apply" onPress={() => p.act({ kind: 'apply' })} />
+        {p.restart === false ? null : <Button key={`${k}-restart`} label="Start over" onPress={() => p.act({ kind: 'restart' })} />}
+        <Button key={`${k}-cancel`} label="Cancel" onPress={() => p.act({ kind: 'cancel' })} />
       </Box>
     )
   }
-  const slot = f.slots[f.i]
-  if (!slot) return null
+  const s = p.step
+  if (!s) return null
   return (
     <Box flexDirection="column">
-      <Text bold>{`Boss look (${f.i + 1} of ${f.slots.length}): ${STEP_QUESTIONS[slot]}`}</Text>
-      {stepOptions(slot, f.draft).map((o) => (
-        <Button key={`boss-${slot}-${o.id}`} label={o.label} onPress={() => pressBoss($, { kind: 'choose', id: o.id })} />
+      <Text bold>{s.title}</Text>
+      {s.options.map((o) => (
+        <Button key={`${k}-${s.stepKey}-${o.id}`} label={o.label} onPress={() => p.act({ kind: 'choose', id: o.id })} />
       ))}
-      {Input ? <Input key={`boss-other-${slot}`} label="Other: " placeholder="describe it in words, then Enter" onSubmit={(v: string) => pressBoss($, { kind: 'other', text: v })} /> : null}
+      {Input ? <Input key={`${k}-other-${s.stepKey}`} label="Other: " placeholder={s.other ?? 'describe it in words, then Enter'} onSubmit={(v: string) => p.act({ kind: 'other', text: v })} /> : null}
       {note}
-      <Button key="boss-cancel" label="Cancel" onPress={() => pressBoss($, { kind: 'cancel' })} />
+      <Button key={`${k}-cancel`} label="Cancel" onPress={() => p.act({ kind: 'cancel' })} />
     </Box>
   )
+}
+
+/** Whichever customization is waiting for choices (only one at a time). */
+function flowView($: EngineInterface, e: RenderInput) {
+  const b = bossFlow
+  if (b) {
+    const slot = b.slots[b.i]
+    return choiceView($, e, {
+      heading: 'Boss look', prefix: 'boss', busy: b.busy, notes: b.notes, act: (a) => pressBoss($, a),
+      ...(b.stage === 'confirm' ? { confirm: summaryLines(b) } : slot ? { step: { title: `Boss look (${b.i + 1} of ${b.slots.length}): ${STEP_QUESTIONS[slot]}`, stepKey: slot, options: stepOptions(slot, b.draft) } } : {}),
+    })
+  }
+  const f = teamFlow
+  if (f) {
+    const step = teamStep(f)
+    return choiceView($, e, {
+      heading: 'Team', prefix: 'team', busy: f.busy, notes: f.notes, act: (a) => pressTeam($, a),
+      ...(f.stage === 'confirm' ? { confirm: teamSummary(f) } : step ? { step: { title: `Team: ${step.question}`, stepKey: step.key, options: step.options, other: step.other } } : {}),
+    })
+  }
+  const th = themeFlow
+  if (th) {
+    return choiceView($, e, { heading: `Theme "${th.theme.name}"`, prefix: 'theme', busy: false, notes: [], confirm: th.lines, restart: false, act: (a) => pressTheme($, a) })
+  }
+  return null
 }
 
 async function feedback($: EngineInterface): Promise<string> {
@@ -735,6 +1004,8 @@ async function runCommand($: EngineInterface, name: string, args: string): Promi
   const c = COMMANDS.find((x) => x.name === name)
   const out = c ? c.run(args) : { text: 'Unknown command. Type /office-space-help.' }
   if ('boss' in out) return runBoss($, out.boss)
+  if ('team' in out) return runTeam($, out.team)
+  if ('theme' in out) return runTheme($, out.theme)
   if ('action' in out) {
     try {
       const a = out.action
@@ -758,7 +1029,7 @@ export function helpText(): string {
     ...lines,
     '',
     'Settings (/plugin -> office-space -> configure): workersDir, staleMinutes, alertOnBlocked, checkForUpdates, showUsage.',
-    'Only /office-space-roster makes an AI call (one small-model request per run, outside your chat); everything else is local. None of it adds anything to your conversation.',
+    'Only /office-space-roster, and /office-space-boss and /office-space-team when you use words, make an AI call (one small-model request each, outside your chat); everything else is local. None of it adds anything to your conversation.',
     'Docs: https://github.com/rbrtcnkln1/office-space#readme',
   ].join('\n')
 }
@@ -834,11 +1105,7 @@ export const register: Register = (on, options) => {
     try {
       bandOn = (await $.store.get(STORE_BAND)) === true
     } catch {}
-    try {
-      const saved = await $.store.get(STORE_BOSS)
-      bossLook = saved === undefined || saved === null ? undefined : sanitizeLook(saved)
-      office.bossLook = bossLook
-    } catch {}
+    await loadSaved($)
     // The panel is never assumed open from an earlier chat; only one the app
     // already shows in this session (restored or kept across a reload) counts.
     paneOpen = await paneShowing($)
@@ -905,7 +1172,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column" backgroundColor={FLOOR} width="100%" height={rows > 0 ? rows : '100%'} flexGrow={1}>
           <Svg source={office.render(PANE_SCALE)} alt={`Office: ${office.summary()}`} />
-          {bossView($, e)}
+          {flowView($, e)}
           {needsView($, e, sel, true)}
         </Box>
       )
@@ -922,7 +1189,7 @@ export const register: Register = (on, options) => {
             <Text dimColor>{l.label}</Text>
           </Text>
         ))}
-        {bossView($, e)}
+        {flowView($, e)}
         {needsView($, e, sel, true)}
       </Box>
     )

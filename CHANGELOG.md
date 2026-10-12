@@ -2,6 +2,12 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## Unreleased
+Make the team yours.
+- New `/office-space-team`: rename roles ("call the Coder Mx. Bytes"), restyle them from the art catalog (hair, hair color, outfit, accessory) and set the starting desk count (5 to 15, in rows of five). Say it in words or pick step by step in the panel; you press Apply before anything is saved. `reset` restores everything, `reset coder` one role. Names are cleaned and drawn as plain text.
+- New `/office-space-theme`: `save <name>` writes your Boss, team and office to a small JSON file you can share, `load <name or path>` reads one back (strictly checked, data only, with an Apply step), `list`, and `reset`. Three built-in presets: 90s startup, cozy library, night shift.
+- Words for the team use a little plan usage, like the Boss. Themes use none.
+
 ## 0.11.0 — 2026-10-11
 Make the Boss yours.
 - New `/office-space-boss`: change the Boss's hair style, hair color, outfit and accessory. Type what you want in plain words, or pick step by step with buttons in the Office Space panel. You see what will change and press Apply before anything is saved. `reset` brings the default back, and your look is kept between sessions.

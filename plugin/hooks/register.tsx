@@ -242,14 +242,18 @@ async function refreshUsage($: EngineInterface): Promise<void> {
  * office is open. One small local read every few seconds; writes only when the
  * tally changes. Never throws.
  */
+async function dayEnsure($: EngineInterface): Promise<void> {
+  const key = dayKey()
+  if (tracker.key !== key) {
+    let saved: unknown
+    try { saved = await $.store.get(key) } catch {}
+    tracker.rollover(key, saved)
+  }
+}
 async function dayTick($: EngineInterface): Promise<void> {
   try {
-    const key = dayKey()
-    if (tracker.key !== key) {
-      let saved: unknown
-      try { saved = await $.store.get(key) } catch {}
-      tracker.rollover(key, saved)
-    }
+    await dayEnsure($)
+    const key = tracker.key
     let list: AgentInfo[] = []
     try { list = await $.agent.list() } catch {}
     const remote = toAgents(await visibleHere($, await readExternal($)), Date.now(), staleMinutes)
@@ -821,6 +825,20 @@ export const register: Register = (on, options) => {
   alertOnBlocked = !(ab === false || ab === 'false')
   const su = (options as { showUsage?: unknown } | undefined)?.showUsage
   showUsage = !(su === false || su === 'false')
+
+  // A subagent ended: tell the recap now, in case the list drops it before the next look.
+  on('classic.SubagentStop', async ($, e, next) => {
+    try {
+      const id = (e as { agent_id?: unknown }).agent_id
+      if (typeof id === 'string' && id) {
+        await dayEnsure($)
+        let latest: AgentLike | undefined
+        try { latest = ((await $.agent.list()) as AgentLike[]).find(a => a.id === id) } catch {}
+        if (tracker.finish(id, String((e as { agent_type?: unknown }).agent_type ?? ''), latest)) await $.store.set(tracker.key, tracker.log)
+      }
+    } catch {}
+    return next(e)
+  })
 
   on('session.start', async ($, e, next) => {
     for (const c of COMMANDS) {

@@ -165,11 +165,15 @@ export class DayTracker {
   key = ''
   log: DayLog = emptyDay()
   private prev = new Map<string, { status: string; need: boolean }>()
+  private counted = new Set<string>() // ended agents already tallied, so the watcher and the stop event never count one twice
+  private known = new Map<string, Seen>()
+  private primed = false // the first look is a baseline: agents already finished then are not today's news
 
   /** Start (or switch to) a day. A new key resets the tally; the same key keeps it. */
   rollover(key: string, saved: unknown): boolean {
     if (key === this.key) return false
     this.key = key
+    this.counted.clear()
     this.log = sanitizeDay(saved)
     return true
   }
@@ -183,18 +187,12 @@ export class DayTracker {
       const who = clip(sanitize(a.name || '') || sanitize(a.description || '') || sanitize(a.type || '') || a.id, 40)
       const need = !!a.remote?.need && !a.remote.stale
       const p = this.prev.get(a.id)
-      if (p && ACTIVE_NOW.has(p.status) && !ACTIVE_NOW.has(a.status)) {
-        if (a.status === 'failed') {
-          this.log.failed++
-          if (this.log.failures.length < LIST_CAP) this.log.failures.push({ who, task: clip(sanitize(a.description || ''), 80) })
-          changed = true
-        } else if (a.status !== 'killed') {
-          this.log.done++
-          const r = roleOf(a)
-          this.log.byRole[r] = (this.log.byRole[r] ?? 0) + 1
-          changed = true
-        }
-      }
+      if (ACTIVE_NOW.has(a.status)) this.counted.delete(a.id) // working again: its next end counts anew
+      this.known.set(a.id, a)
+      // An agent that started and ended between two looks is first seen already
+      // ended: it still counts (once primed), or quick background agents vanish.
+      const wasActive = p ? ACTIVE_NOW.has(p.status) : this.primed && (a.status === 'completed' || a.status === 'failed')
+      if (wasActive && !ACTIVE_NOW.has(a.status) && this.tally(a, who)) changed = true
       if (need && !p?.need) {
         this.log.needed++
         if (this.log.needs.length < LIST_CAP) this.log.needs.push({ who, note: clip(sanitize(a.remote?.note || a.description || ''), 80) })
@@ -203,6 +201,38 @@ export class DayTracker {
       this.prev.set(a.id, { status: a.status, need })
     }
     for (const id of [...this.prev.keys()]) if (!seen.has(id)) this.prev.delete(id)
+    for (const id of [...this.known.keys()]) if (!seen.has(id)) this.known.delete(id)
+    this.primed = true
+    return changed
+  }
+
+  /** Count one ended agent unless it was already counted. Killed ones are not hand-ins. */
+  private tally(a: Seen, who: string): boolean {
+    if (this.counted.has(a.id) || a.status === 'killed') return false
+    this.counted.add(a.id)
+    if (a.status === 'failed') {
+      this.log.failed++
+      if (this.log.failures.length < LIST_CAP) this.log.failures.push({ who, task: clip(sanitize(a.description || ''), 80) })
+    } else {
+      this.log.done++
+      const r = roleOf(a)
+      this.log.byRole[r] = (this.log.byRole[r] ?? 0) + 1
+    }
+    return true
+  }
+
+  /**
+   * A subagent-stop event: the agent ended, whatever the list still shows.
+   * `latest` is its entry in a fresh agent list, if it is still there.
+   * True when the tally changed.
+   */
+  finish(id: string, type: string, latest?: Seen): boolean {
+    if (typeof id !== 'string' || !id) return false
+    const base = latest ?? this.known.get(id) ?? { id, description: '', type: typeof type === 'string' ? type : '', status: 'completed' }
+    const a: Seen = { ...base, status: base.status === 'failed' ? 'failed' : 'completed' }
+    const who = clip(sanitize(a.name || '') || sanitize(a.description || '') || sanitize(a.type || '') || a.id, 40)
+    const changed = this.tally(a, who)
+    this.prev.set(id, { status: a.status, need: this.prev.get(id)?.need ?? false })
     return changed
   }
 }

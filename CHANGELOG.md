@@ -2,9 +2,11 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
-## Unreleased
-- New `/office-space-boss`: change the Boss's hair style, hair color, outfit and accessory from plain words or a step-by-step choice in the Office Space panel, with a confirmation before anything is saved, `reset`, and persistence between sessions. Words use one small side model call (a little plan usage); nothing is added to the conversation.
-- A reusable art catalog (`hooks/catalog.ts`): 8 hair styles, 14 hair colors, 6 outfits (including an early-2000s track jacket) and 6 accessories; everything a model returns is validated against it.
+## 0.11.0 — 2026-10-11
+Make the Boss yours.
+- New `/office-space-boss`: change the Boss's hair style, hair color, outfit and accessory. Type what you want in plain words, or pick step by step with buttons in the Office Space panel. You see what will change and press Apply before anything is saved. `reset` brings the default back, and your look is kept between sessions.
+- Describing a look in words makes one small side request to a model, which uses a little plan usage. The step-by-step choice uses none. Nothing is added to your conversation.
+- The catalog: 8 hair styles, 14 hair colors, 6 outfits (including an early-2000s track jacket) and 6 accessories. Anything a model suggests is checked against it before it is shown.
 
 ## 0.10.0 — 2026-10-11
 Four commands that tell you what is happening in the office, and a usage board.

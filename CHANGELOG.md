@@ -5,6 +5,10 @@ Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump 
 ## Unreleased
 - Fix: the task line under each desk now wraps to at most two lines (24 characters each, ending in an ellipsis when cut) so neighbouring desks' text no longer runs together.
 - Fix: `/office-space-recap` missed background agents that started and finished between two 5-second looks, so busy days showed 0 hand-ins. Agents first seen already completed or failed now count (the first look after loading is only a baseline, so earlier work is not recounted). The recap also listens for the host's subagent-stop event, so an agent is counted even if the list drops it before the next look; each agent is counted once per finish.
+- New `/office-space-office`: decorate the office. Pick from 9 wall colors, 8 floors, a vending machine, arcade cabinet, couch, potted fern, cactus, lava lamp, fish tank and 4 posters, in plain words or step by step with buttons in the Office Space panel. You see what will change and press Apply before anything is saved; the decor is kept between sessions. `remove <piece>`, `list` and `reset` need no AI call. Pieces only go where nobody walks, and the default office draws exactly as before.
+- Workers now visit a vending machine on their breaks (when you add one) and carry back a soda, donut or cookie.
+- Describing the decor in words (or choosing Other) makes one small side request to a model, which uses a little plan usage; the reply is checked against the catalog before it is shown. Nothing is added to your conversation.
+- The step-by-step choice screen is now shared by `/office-space-boss` and `/office-space-office`.
 
 ## 0.11.0 — 2026-10-11
 Make the Boss yours.

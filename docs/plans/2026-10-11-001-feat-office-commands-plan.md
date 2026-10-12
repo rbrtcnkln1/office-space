@@ -118,3 +118,12 @@ Covers R8, R12, R13 (Boss), R14-R18, R20.
 - **Catalog:** `plugin/hooks/catalog.ts` (ids, labels, colors, validation, closest-options text) is pure and shared by the later team/office/theme commands; the art is drawn by `character()` in `sprites.ts`.
 - **Persistence:** `$.store` key `bossLook`, read on `session.start`, cleared by `/office-space-boss reset`.
 - **Confirmation:** every change, from words or steps, shows its summary with Apply, Start over and Cancel; only Apply saves.
+
+## Wave 2, slice: `/office-space-office` (resolved)
+
+Covers R10, R12, R13 (office), R14-R18, R20.
+
+- **Shared stepped flow.** `plugin/hooks/flow.ts` holds the neutral `Action` and `FlowView` types. Each command keeps its own pure state machine (`boss.ts`, `decorate.ts`) and turns its state into a `FlowView`; `register.tsx` draws every view with one `flowView` function (question, 2 to 4 buttons, an Other field, then summary with Apply, Start over, Cancel) and routes presses by command id. Button keys stay `<command>-<step>-<option>`, so the Boss tests are unchanged. Only one flow is open at a time.
+- **Catalog.** `decor.ts` (ids, labels, slots, geometry, validation, `OfficeLook` with `sanitizeOffice`/`parseOfficePatch`) and `decorart.ts` (pixel grids and floor patterns). Themes can serialize an `OfficeLook` as is.
+- **Slots never block paths.** 3 wall slots, the vending machine's own break-area spot, and 5 slots along a 30 px strip added under the last row of desks (only when something stands there). A test checks every slot against the aisle, corridors, desks, door, Boss desk, break spots and existing furniture at several room sizes.
+- **AI path.** The same haiku side call as the Boss; the reply must be one JSON object of catalog ids (`wall`, `floor`, `add`, `remove`, plus `unknown` and `vague`), validated as a whole. Persistence: `$.store` key `officeLook`.

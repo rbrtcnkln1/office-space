@@ -749,11 +749,24 @@ async function runCustomize($: EngineInterface, id: FlowId, args: string): Promi
   }
 }
 
-/** A button or typed answer in the panel's steps, routed to whichever command is open. */
-function pressFlow($: EngineInterface, a: Action) {
+const viewOf = (cur: ActiveFlow) => cur.id === 'boss' ? bossView(cur.flow) : cur.id === 'office' ? officeView(cur.flow) : cur.id === 'team' ? teamView(cur.flow) : themeView(cur.flow)
+/** Which step a drawing showed: a press is only taken while the panel still shows that step. */
+const stepToken = (v: { id: string; stage: string; stepKey: string; heading: string }) => `${v.id}\u0000${v.stage}\u0000${v.stepKey}\u0000${v.heading}`
+let flowPressing = false // one press at a time: a repeated click while one is settling does nothing
+
+/**
+ * A button or typed answer in the panel's steps, routed to whichever command
+ * is open. `token` names the step the pressed drawing showed; a press that
+ * arrives after the step moved on (a double click, a late click) is dropped,
+ * so a press never lands on a different question or applies twice.
+ */
+function pressFlow($: EngineInterface, a: Action, token?: string) {
   const cur = activeFlow
-  if (!cur || cur.flow.busy) return
+  if (!cur || cur.flow.busy || flowPressing) return
+  const shown = viewOf(cur)
+  if (token !== undefined && (!shown || stepToken(shown) !== token)) return
   if (cur.id === 'theme') return pressTheme($, cur.flow, a)
+  flowPressing = true
   void (async () => {
     try {
       if (a.kind === 'other') {
@@ -766,6 +779,8 @@ function pressFlow($: EngineInterface, a: Action) {
     } catch {
       activeFlow = null
       $.ui.invalidate('ui.render')
+    } finally {
+      flowPressing = false
     }
   })()
 }
@@ -898,16 +913,50 @@ function pressTheme($: EngineInterface, f: ThemeFlow, a: Action) {
   })()
 }
 
+/**
+ * Pressable elements kept from one drawing to the next.
+ *
+ * Every `<Button>` (or `<Input>`) built gets a fresh press handle, and the host
+ * releases each handle a newer drawing of the same site no longer carries. A
+ * desktop click travels back naming the handle of the drawing it was painted
+ * from, so with the panel redrawing on every animation tick, a click almost
+ * always named a handle one redraw old and ran nothing ("no Button ... is held
+ * under handle N; nothing ran"); the terminal presses in-process, so it never
+ * showed. Reusing the same element while its key and props are unchanged
+ * keeps its handle, so a click lands whichever recent drawing it came from.
+ * The element's closure calls the latest handler given for that key.
+ */
+type Kept = { sig: string; el: unknown; run: { fn: (x: any) => void } }
+const kept = new Map<string, Kept>()
+const MAX_KEPT = 400
+function keep<T>(e: RenderInput, key: string, props: Record<string, unknown>, fn: (x: any) => void, make: (handler: (x: any) => void) => T): T {
+  const id = `${e.surface}\u0000${e.component}\u0000${key}`
+  const sig = JSON.stringify(props)
+  const old = kept.get(id)
+  if (old && old.sig === sig) {
+    old.run.fn = fn
+    return old.el as T
+  }
+  if (kept.size >= MAX_KEPT) kept.clear()
+  const run = { fn }
+  const el = make((x) => run.fn(x))
+  kept.set(id, { sig, el, run })
+  return el
+}
+
 /** The steps as buttons (and a text field for "Other" where the surface has one), the same for every command. */
 function flowView($: EngineInterface, e: RenderInput) {
   const cur = activeFlow
-  const v = !cur ? null : cur.id === 'boss' ? bossView(cur.flow) : cur.id === 'office' ? officeView(cur.flow) : cur.id === 'team' ? teamView(cur.flow) : themeView(cur.flow)
+  const v = cur ? viewOf(cur) : null
   if (!v) return null
   const t = $.ui.resolve(e)
   const { Box, Text, Button } = t
   const Input = 'Input' in t ? t.Input : null
+  const token = stepToken(v)
+  const button = (key: string, label: string, a: Action) =>
+    keep(e, key, { label, token }, () => pressFlow($, a, token), (onPress) => <Button key={key} label={label} onPress={onPress} />)
   const note = v.notes.length ? <Text dimColor>{v.notes.join(' ')}</Text> : null
-  const cancel = <Button key={`${v.id}-cancel`} label="Cancel" onPress={() => pressFlow($, { kind: 'cancel' })} />
+  const cancel = button(`${v.id}-cancel`, 'Cancel', { kind: 'cancel' })
   if (v.busy) return <Box flexDirection="column"><Text bold>{v.title}</Text><Text dimColor>Asking the AI...</Text></Box>
   if (v.stage === 'confirm') {
     return (
@@ -915,19 +964,21 @@ function flowView($: EngineInterface, e: RenderInput) {
         <Text bold>{v.heading}</Text>
         {v.summary.map((l, i) => <Text key={`${v.id}-l${i}`}>{l}</Text>)}
         {note}
-        <Button key={`${v.id}-apply`} label="Apply" onPress={() => pressFlow($, { kind: 'apply' })} />
-        {v.restart === false ? null : <Button key={`${v.id}-restart`} label="Start over" onPress={() => pressFlow($, { kind: 'restart' })} />}
+        {button(`${v.id}-apply`, 'Apply', { kind: 'apply' })}
+        {v.restart === false ? null : button(`${v.id}-restart`, 'Start over', { kind: 'restart' })}
         {cancel}
       </Box>
     )
   }
+  const otherKey = `${v.id}-other-${v.stepKey}`
+  const placeholder = v.otherHint ?? 'describe it in words, then Enter'
   return (
     <Box flexDirection="column">
       <Text bold>{v.heading}</Text>
-      {v.options.map((o) => (
-        <Button key={`${v.id}-${v.stepKey}-${o.id}`} label={o.label} onPress={() => pressFlow($, { kind: 'choose', id: o.id })} />
-      ))}
-      {Input && v.other ? <Input key={`${v.id}-other-${v.stepKey}`} label="Other: " placeholder={v.otherHint ?? 'describe it in words, then Enter'} onSubmit={(x: string) => pressFlow($, { kind: 'other', text: x })} /> : null}
+      {v.options.map((o) => button(`${v.id}-${v.stepKey}-${o.id}`, o.label, { kind: 'choose', id: o.id }))}
+      {Input && v.other
+        ? keep(e, otherKey, { placeholder, token }, (x: string) => pressFlow($, { kind: 'other', text: x }, token), (onSubmit) => <Input key={otherKey} label="Other: " placeholder={placeholder} onSubmit={onSubmit} />)
+        : null}
       {note}
       {cancel}
     </Box>
@@ -995,31 +1046,25 @@ function needsView($: EngineInterface, e: RenderInput, sel: string, hotkeys: boo
   return (
     <Box flexDirection="column">
       <Text dimColor>Needs you - press one to read its note</Text>
-      {list.slice(0, 9).map((n, i) => (
-        <Button
-          key={`need:${n.id}`}
-          label={`${n.need === 'blocked' ? 'BLOCKED' : 'WAITING'}: ${n.who}${n.id === sel ? ' (showing)' : ''}`}
-          {...(hotkeys ? { hotkey: String(i + 1) } : {})}
-          onPress={() => { void update($, selected, v => (v === n.id ? '' : n.id)) }}
-        />
-      ))}
+      {list.slice(0, 9).map((n, i) => {
+        const key = `need:${n.id}`
+        const label = `${n.need === 'blocked' ? 'BLOCKED' : 'WAITING'}: ${n.who}${n.id === sel ? ' (showing)' : ''}`
+        const hk = hotkeys ? { hotkey: String(i + 1) } : {}
+        return keep(e, key, { label, ...hk }, () => { void update($, selected, v => (v === n.id ? '' : n.id)) }, (onPress) => <Button key={key} label={label} {...hk} onPress={onPress} />)
+      })}
       {cur ? (
         <Box flexDirection="column">
           <Text bold>{`${cur.who} [${cur.source}] is ${cur.need}`}</Text>
           <Text>{cur.note ?? `No note left. Task: ${cur.task}`}</Text>
           {cur.url ? <Text>{cur.url}</Text> : null}
-          {cur.url ? (
-            <Button
-              key="need-copy"
-              label="Copy link"
-              onPress={press => {
+          {cur.url
+            ? keep(e, 'need-copy', { url: cur.url }, (press: { surface: RenderInput['surface'] }) => {
                 void (async () => {
                   const r = await $.ui.copy({ text: cur.url as string, surface: press.surface })
                   $.ui.toast(r.isCopied ? 'Office Space: link copied' : 'Office Space: could not copy, select the link above')
                 })()
-              }}
-            />
-          ) : null}
+              }, (onPress) => <Button key="need-copy" label="Copy link" onPress={onPress} />)
+            : null}
         </Box>
       ) : null}
     </Box>

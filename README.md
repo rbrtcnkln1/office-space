@@ -34,6 +34,7 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 | `/office-space-band` | Show or hide the small office strip above the prompt |
 | `/office-space-help` | List every Office Space command and setting |
 | `/office-space-update` | Check GitHub for a newer version and update to it (see [Updating](#updating)) |
+| `/office-space-boss` | Change how the Boss looks in plain words or step by step, or `reset` (see [Make the Boss yours](#make-the-boss-yours)) |
 | `/office-space-feedback` | Shows the link to report a bug or share an idea, plus your version details to paste in |
 | `/office-space-roster` | Who is at work right now (subagents and outside workers), how long they have been at it, and a one-line summary of what each is doing. Uses a little plan usage (see below) |
 | `/office-space-recap` | Today's hand-ins, failures, outside workers that needed a person, and the Employee of the Day |
@@ -84,6 +85,21 @@ The settings are optional and have defaults. Change them in `/plugin` → office
 - `examples/demo.sh`: a 60-second demo with fake workers. Usage: `bash examples/demo.sh`
 
 More commands (customize the Boss, your team and the office) are planned — see the [roadmap issues](https://github.com/rbrtcnkln1/office-space/issues).
+
+## Make the Boss yours
+
+Give the Boss a new look, from a small catalog of pixel-art hair styles, hair colors, outfits and accessories:
+
+```
+/office-space-boss pink frosted hair, an early-2000s track jacket and headphones
+```
+
+- Run it with no words and the Office Space panel walks you through hair style, hair color, outfit and accessory, a few buttons each. Type your own into **Other** and it is read the same way as plain words.
+- Whatever you ask for, you see what will change and press **Apply** (or **Cancel**) before anything is saved. The look is kept between sessions. `/office-space-boss reset` brings the default back.
+- If you ask for something the catalog does not have yet, such as a jetpack, the reply says so and lists the closest options.
+- Reading your words (and "Other") makes one small call to a fast model, so it uses a little of your plan usage. Picking buttons does not. Nothing is added to your conversation.
+
+![The default Boss next to a customized one](docs/media/boss-before-after.png)
 
 ## Updating
 

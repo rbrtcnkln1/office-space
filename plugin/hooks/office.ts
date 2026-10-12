@@ -7,9 +7,10 @@
 //   Boss, hands in the result -> walks out the door; the desk empties again.
 
 import {
-  BUBBLE_ASK, BUBBLE_DOTS, BUBBLE_STOP, CHECK, PACKET_ERR, PACKET_OK, ROLES, character, feetUp, grid, icon, outline, paletteFor, pushup, roleFor,
+  BUBBLE_ASK, BUBBLE_DOTS, BUBBLE_STOP, CHECK, PACKET_ERR, PACKET_OK, ROLES, character, feetUp, grid, icon, outline, lookKey, paletteFor, pushup, roleFor,
 } from './sprites'
 import type { Dir, Grid, Palette, RoleId } from './sprites'
+import type { BossLook } from './catalog'
 import { sanitize } from './external'
 import type { RemoteInfo } from './external'
 import { usageTray, usageWall } from './usageart'
@@ -242,6 +243,8 @@ export class Office {
   bossWorking = false
   usage: UsageBoard | null = null // drawn as the in-tray, wall clock and calendar when set (see ./usageart.ts)
   clockNow = 0 // fixed time for the usage objects (media scenes); 0 = the real time
+  /** The Boss's customization (catalog ids), or none for the default look. */
+  bossLook: BossLook | undefined = undefined
   private initialized = false
 
   constructor() {
@@ -777,7 +780,7 @@ export class Office {
       if (this.lounging()) {
         const seat = this.bossSeat()
         add(by + 16, this.charSvg('boss', 'down', 'lounge', 0, false, (f + 7) % 47 < 3, false, { x: seat.x, y: seat.y + 1 }))
-        add(by + 28.3, place(seat.x - 11, by + 11, gridSvg('feet-up', feetUp('boss'), { ...paletteFor('boss'), X: '#c9ccd6' })))
+        add(by + 28.3, place(seat.x - 11, by + 11, gridSvg(`feet-up${lookKey(this.bossLook)}`, feetUp('boss'), { ...paletteFor('boss', this.bossLook), X: '#c9ccd6' })))
         // whistled notes drift up and away
         for (let i = 0; i < 2; i++) {
           const t = (f + i * 9) % 18
@@ -961,8 +964,9 @@ export class Office {
   }
 
   private charSvg(role: RoleId, dir: Dir, pose: 'stand' | 'walk' | 'seat' | 'reach' | 'lounge', frame: number, typing: boolean, blink: boolean, nod: boolean, pos: Pt): string {
-    const key = `c-${role}-${dir}-${pose}-${frame}-${typing}-${blink}-${nod}`
-    return place(pos.x, pos.y, gridSvg(key, character({ role, dir, pose, frame, typing, blink, nod }), paletteFor(role)))
+    const look = role === 'boss' ? this.bossLook : undefined
+    const key = `c-${role}-${dir}-${pose}-${frame}-${typing}-${blink}-${nod}-${lookKey(look)}`
+    return place(pos.x, pos.y, gridSvg(key, character({ role, dir, pose, frame, typing, blink, nod, ...(look ? { look } : {}) }), paletteFor(role, look)))
   }
 
   dot(w: Worker): string {

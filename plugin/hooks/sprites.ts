@@ -5,11 +5,14 @@
 // from one shared body template, so every role has the same proportions, head
 // size, outline and frame size (16 x 24 logical pixels).
 
+import { entry } from './catalog'
+import type { BossLook, OutfitDetail } from './catalog'
+
 export type Dir = 'down' | 'up' | 'left' | 'right'
 export type Grid = string[][]
 export type Palette = Record<string, string>
 
-export type HairStyle = 'short' | 'spiky' | 'bun' | 'long' | 'cap' | 'bald' | 'curly' | 'bob'
+export type HairStyle = 'short' | 'spiky' | 'bun' | 'long' | 'cap' | 'bald' | 'curly' | 'bob' | 'frosted'
 export type PropIcon =
   | 'clipboard' | 'book' | 'code' | 'doc' | 'chart' | 'wrench' | 'cloud' | 'magnifier' | 'question' | 'bulb' | 'mug'
 
@@ -50,6 +53,8 @@ export const BASE: Palette = {
   F: '#20202a',
   K: '#c0392b',
   k: '#8e2a20',
+  J: '#f6eab8', // frosted tips
+  A: '#30344a', // headphone band
 }
 
 export const FURNITURE: Palette = {
@@ -118,8 +123,23 @@ export function roleFor(text: string, seed: number): RoleId {
   return FALLBACK_ROLES[seed % FALLBACK_ROLES.length] as RoleId
 }
 
-export function paletteFor(role: RoleId): Palette {
-  return { ...BASE, ...FURNITURE, ...ROLES[role].colors } as Palette
+export function paletteFor(role: RoleId, look?: BossLook): Palette {
+  return { ...BASE, ...FURNITURE, ...ROLES[role].colors, ...(role === 'boss' && look ? lookColors(look) : {}) } as Palette
+}
+
+/** The palette keys a Boss look changes (hair color and outfit colors). */
+function lookColors(look: BossLook): Palette {
+  const hc = entry('hairColor', look.hairColor) as { H: string; h: string } | undefined
+  const of = entry('outfit', look.outfit) as { C: string; c: string; P: string; F: string } | undefined
+  return {
+    ...(hc ? { H: hc.H, h: hc.h } : {}),
+    ...(of ? { C: of.C, c: of.c, P: of.P, F: of.F } : {}),
+  }
+}
+
+/** A short stable key for caching drawings of a look. */
+export function lookKey(look?: BossLook): string {
+  return look ? `${look.hair}.${look.hairColor}.${look.outfit}.${look.accessory}` : ''
 }
 
 // ---------- Grid helpers ----------
@@ -167,6 +187,8 @@ export type CharOpts = {
   typing?: boolean
   blink?: boolean
   nod?: boolean
+  /** The Boss's customization (catalog ids); ignored for every other role. */
+  look?: BossLook
 }
 
 function hair(g: Grid, style: HairStyle, dir: Dir) {
@@ -176,7 +198,8 @@ function hair(g: Grid, style: HairStyle, dir: Dir) {
     rect(g, 9, 3, 3, 5, 'h')
     if (style === 'long' || style === 'bob') rect(g, 4, 9, 8, style === 'long' ? 3 : 1, 'H')
     if (style === 'bun') rect(g, 7, 0, 2, 2, 'H')
-    if (style === 'spiky') { dot(g, 5, 1, 'H'); dot(g, 8, 1, 'H'); dot(g, 10, 1, 'H') }
+    if (style === 'spiky' || style === 'frosted') { dot(g, 5, 1, 'H'); dot(g, 8, 1, 'H'); dot(g, 10, 1, 'H') }
+    if (style === 'frosted') { dot(g, 5, 0, 'J'); dot(g, 8, 0, 'J'); dot(g, 10, 0, 'J') }
     if (style === 'curly') { rect(g, 3, 1, 10, 8, 'H'); rect(g, 10, 3, 3, 5, 'h') }
     if (style === 'cap') { rect(g, 4, 1, 8, 3, 'K'); rect(g, 4, 4, 8, 1, 'k') }
     if (style === 'bald') { rect(g, 4, 2, 8, 4, 'S'); rect(g, 4, 6, 8, 3, 'H'); dot(g, 7, 3, 'W') }
@@ -199,7 +222,8 @@ function hair(g: Grid, style: HairStyle, dir: Dir) {
     rect(g, 9, 3, 3, 1, 'h')
     rect(g, 4, 4, 1, 2, 'H')
     rect(g, 11, 4, 1, 1, 'H')
-    if (style === 'spiky') { dot(g, 5, 1, 'H'); dot(g, 7, 1, 'H'); dot(g, 9, 1, 'H'); dot(g, 11, 1, 'H') }
+    if (style === 'spiky' || style === 'frosted') { dot(g, 5, 1, 'H'); dot(g, 7, 1, 'H'); dot(g, 9, 1, 'H'); dot(g, 11, 1, 'H') }
+    if (style === 'frosted') { for (const x of [5, 7, 9, 11]) dot(g, x, 0, 'J'); dot(g, 6, 2, 'J'); dot(g, 10, 2, 'J') }
     if (style === 'bun') rect(g, 7, 0, 2, 2, 'H')
     if (style === 'long') { rect(g, 4, 4, 1, 8, 'H'); rect(g, 11, 4, 1, 8, 'H'); rect(g, 3, 6, 1, 6, 'h'); rect(g, 12, 6, 1, 6, 'h') }
     if (style === 'bob') { rect(g, 4, 4, 1, 5, 'H'); rect(g, 11, 4, 1, 5, 'H'); rect(g, 5, 4, 3, 1, 'H') }
@@ -212,16 +236,17 @@ function hair(g: Grid, style: HairStyle, dir: Dir) {
   rect(g, 5, 2, 7, 2, 'H')
   rect(g, 5, 4, 2, 3, 'H')
   rect(g, 6, 4, 1, 3, 'h')
-  if (style === 'spiky') { dot(g, 6, 1, 'H'); dot(g, 8, 1, 'H'); dot(g, 10, 1, 'H') }
+  if (style === 'spiky' || style === 'frosted') { dot(g, 6, 1, 'H'); dot(g, 8, 1, 'H'); dot(g, 10, 1, 'H') }
+  if (style === 'frosted') { dot(g, 6, 0, 'J'); dot(g, 8, 0, 'J'); dot(g, 10, 0, 'J') }
   if (style === 'bun') rect(g, 4, 2, 2, 2, 'H')
   if (style === 'long') rect(g, 4, 4, 3, 8, 'H')
   if (style === 'bob') rect(g, 4, 4, 3, 5, 'H')
 }
 
-function face(g: Grid, role: Role, dir: Dir, blink: boolean) {
+function face(g: Grid, role: Role, dir: Dir, blink: boolean, glasses: boolean) {
   if (dir === 'up') return
   if (dir === 'down') {
-    if (role.glasses) {
+    if (glasses) {
       rect(g, 5, 5, 3, 1, 'G'); rect(g, 8, 5, 3, 1, 'G')
       dot(g, 5, 6, 'G'); dot(g, 6, 6, blink ? 'G' : 'L'); dot(g, 7, 6, 'G')
       dot(g, 8, 6, 'G'); dot(g, 9, 6, blink ? 'G' : 'L'); dot(g, 10, 6, 'G')
@@ -233,7 +258,7 @@ function face(g: Grid, role: Role, dir: Dir, blink: boolean) {
     else rect(g, 7, 8, 2, 1, 'M')
     return
   }
-  if (role.glasses) { rect(g, 9, 5, 3, 1, 'G'); dot(g, 9, 6, 'G'); dot(g, 10, 6, blink ? 'G' : 'L'); dot(g, 11, 6, 'G'); rect(g, 7, 6, 2, 1, 'G') }
+  if (glasses) { rect(g, 9, 5, 3, 1, 'G'); dot(g, 9, 6, 'G'); dot(g, 10, 6, blink ? 'G' : 'L'); dot(g, 11, 6, 'G'); rect(g, 7, 6, 2, 1, 'G') }
   else dot(g, 10, 6, blink ? 's' : 'E')
   dot(g, 12, 7, 'S')
   dot(g, 10, 8, 'M')
@@ -242,6 +267,9 @@ function face(g: Grid, role: Role, dir: Dir, blink: boolean) {
 /** One character frame, outlined, 16 x 24. */
 export function character(o: CharOpts): Grid {
   const role = ROLES[o.role]
+  const look = o.role === 'boss' ? o.look : undefined
+  const hairStyle: HairStyle = look ? look.hair : role.hairStyle
+  const glasses = look ? look.accessory === 'glasses' : role.glasses
   const g = grid(SPRITE_W, SPRITE_H)
   const side = o.dir === 'left' || o.dir === 'right'
   const bob = o.nod ? 1 : 0
@@ -250,10 +278,10 @@ export function character(o: CharOpts): Grid {
   if (side) rect(g, 5, 2 + bob, 7, 8, 'S')
   else { rect(g, 4, 2 + bob, 8, 8, 'S'); if (o.dir === 'down') rect(g, 11, 4 + bob, 1, 6, 's') }
   const hg = grid(SPRITE_W, SPRITE_H)
-  hair(hg, role.hairStyle, o.dir === 'left' ? 'right' : o.dir)
+  hair(hg, hairStyle, o.dir === 'left' ? 'right' : o.dir)
   for (let y = 0; y < SPRITE_H; y++) for (let x = 0; x < SPRITE_W; x++) if (at(hg, x, y) !== '.') (g[Math.min(SPRITE_H - 1, y + bob)] as string[])[x] = at(hg, x, y)
   const fg = grid(SPRITE_W, SPRITE_H)
-  face(fg, role, o.dir === 'left' ? 'right' : o.dir, !!o.blink)
+  face(fg, role, o.dir === 'left' ? 'right' : o.dir, !!o.blink, glasses)
   for (let y = 0; y < SPRITE_H; y++) for (let x = 0; x < SPRITE_W; x++) if (at(fg, x, y) !== '.') (g[Math.min(SPRITE_H - 1, y + bob)] as string[])[x] = at(fg, x, y)
 
   // torso
@@ -305,8 +333,57 @@ export function character(o: CharOpts): Grid {
     legs(g, side, phase)
   }
 
+  if (look) dress(g, entry('outfit', look.outfit) as { detail: OutfitDetail } | undefined, look.accessory, o.dir === 'left' ? 'right' : o.dir, bob)
+
   const out = outline(g)
   return o.dir === 'left' ? mirror(out) : out
+}
+
+/**
+ * The Boss's outfit details and accessory, drawn over the finished body (so
+ * they sit on top of arms and hair). g faces right for side views; the caller
+ * mirrors it for left. Every piece is a few pixels, like the rest of the art.
+ */
+function dress(g: Grid, outfit: { detail: OutfitDetail } | undefined, acc: BossLook['accessory'], dir: Dir, bob: number) {
+  const side = dir === 'left' || dir === 'right'
+  const front = dir === 'down'
+  const detail = outfit?.detail ?? 'suit'
+  if (detail === 'hoodie') {
+    if (side) { rect(g, 6, 10, 5, 1, 'c'); rect(g, 7, 14, 4, 2, 'c') }
+    else { rect(g, 4, 10, 8, 1, 'c'); if (front) { dot(g, 7, 11, 'W'); dot(g, 8, 11, 'W'); dot(g, 7, 12, 'W'); dot(g, 8, 12, 'W'); rect(g, 5, 14, 6, 2, 'c') } }
+  } else if (detail === 'tee') {
+    // short sleeves: bare forearms, one chest stripe
+    for (const [x, y] of side ? [[8, 13], [8, 14]] : [[3, 13], [3, 14], [12, 13], [12, 14]] as number[][]) if (at(g, x as number, y as number) === 'C') dot(g, x as number, y as number, 'S')
+    if (side) rect(g, 6, 12, 5, 1, 'W'); else rect(g, 4, 12, 8, 1, 'W')
+  } else if (detail === 'track') {
+    // white side stripes, a zip and a high collar
+    if (side) { rect(g, 6, 11, 1, 5, 'W'); dot(g, 10, 10, 'W'); rect(g, 10, 11, 1, 5, 'c') }
+    else {
+      rect(g, 4, 10, 1, 6, 'W'); rect(g, 11, 10, 1, 6, 'W')
+      if (front) { rect(g, 7, 10, 2, 1, 'W'); rect(g, 7, 11, 1, 5, 'c') } else rect(g, 5, 10, 6, 1, 'W')
+    }
+  } else if (detail === 'cardigan') {
+    if (side) rect(g, 10, 10, 1, 6, 'W')
+    else if (front) { rect(g, 7, 10, 2, 6, 'W'); dot(g, 8, 12, 'c'); dot(g, 8, 14, 'c') }
+  } else if (detail === 'coat') {
+    if (side) { rect(g, 10, 10, 1, 6, 'c'); dot(g, 7, 13, 'c') }
+    else if (front) { rect(g, 8, 11, 1, 5, 'c'); dot(g, 6, 10, 'c'); dot(g, 9, 10, 'c'); dot(g, 5, 13, 'c'); dot(g, 6, 13, 'c') }
+  }
+
+  const up = dir === 'up'
+  if (acc === 'headphones') {
+    if (side) { rect(g, 5, 1 + bob, 7, 1, 'A'); rect(g, 7, 2 + bob, 1, 3, 'A'); rect(g, 6, 5 + bob, 3, 3, 'K') }
+    else { rect(g, 4, 1 + bob, 8, 1, 'A'); rect(g, 3, 2 + bob, 1, 3, 'A'); rect(g, 12, 2 + bob, 1, 3, 'A'); rect(g, 2, 5 + bob, 2, 3, 'K'); rect(g, 12, 5 + bob, 2, 3, 'K') }
+  } else if (acc === 'cap') {
+    if (side) { rect(g, 5, 1 + bob, 7, 3, 'K'); rect(g, 10, 4 + bob, 4, 1, 'k') }
+    else { rect(g, 4, 1 + bob, 8, 3, 'K'); rect(g, up ? 4 : 3, 4 + bob, up ? 8 : 10, 1, 'k') }
+  } else if (acc === 'tie') {
+    if (side) rect(g, 10, 11, 1, 4, 'K')
+    else if (front) { rect(g, 7, 11, 2, 1, 'k'); rect(g, 7, 12, 2, 3, 'K') }
+  } else if (acc === 'scarf') {
+    if (side) { rect(g, 6, 10, 5, 2, 'K'); rect(g, 6, 12, 2, 3, 'k') }
+    else { rect(g, 4, 10, 8, 2, 'K'); if (front) rect(g, 10, 12, 2, 3, 'k') }
+  }
 }
 
 function legs(g: Grid, side: boolean, phase: number) {

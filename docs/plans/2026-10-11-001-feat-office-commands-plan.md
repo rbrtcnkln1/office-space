@@ -108,3 +108,13 @@ Today the office can be opened, banded, updated and reported on, but people cann
 - **Recap.** `DayTracker` watches the agent list and outside workers every 5 seconds (local reads only, with the office open or closed) and stores the tally in `$.store` as `day:<date>`; a new date starts empty.
 - **Usage objects.** Drawn by `usageart.ts` from `usage.ts` figures; `office.usage` is set from `session.measure` and `$.session.usage()`; `showUsage` clears it.
 - **Workers.** `external.ts` gained `classifyWorker` (skip reasons); `info.ts` builds the report.
+
+## Wave 2, slice 1: catalog foundation and `/office-space-boss` (resolved)
+
+Covers R8, R12, R13 (Boss), R14-R18, R20.
+
+- **Stepped choices use the Office Space panel, not a host dialog.** The host has `$.ui.ask` (an AskUserQuestion dialog), but it cannot be shown to work from inside a slash command on every build, and a command the host does not recognize falls through to the chat as a message. So the command only ever answers with one short line and opens the panel; the steps are `Button`s (plus an `Input` for "Other" on terminal and desktop) drawn by the panel's own `ui.render` hook, which the tests mount on both surfaces. No path leads to the model or the conversation (R17).
+- **Side call:** `$.model.complete({ model: 'haiku', effort: 'low', maxTokens: 300, timeoutMs: 20000 })`, one call per request, no history, no tools. The reply must be one JSON object of catalog ids (plus `unknown` and `vague` lists) and is validated strictly before anything is shown or saved.
+- **Catalog:** `plugin/hooks/catalog.ts` (ids, labels, colors, validation, closest-options text) is pure and shared by the later team/office/theme commands; the art is drawn by `character()` in `sprites.ts`.
+- **Persistence:** `$.store` key `bossLook`, read on `session.start`, cleared by `/office-space-boss reset`.
+- **Confirmation:** every change, from words or steps, shows its summary with Apply, Start over and Cancel; only Apply saves.

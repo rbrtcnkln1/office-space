@@ -3,7 +3,7 @@
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
 ## Unreleased
-- Fix: `/office-space-recap` missed background agents that started and finished between two 5-second looks, so busy days showed 0 hand-ins. Agents first seen already completed or failed now count (the first look after loading is only a baseline, so earlier work is not recounted).
+- Fix: `/office-space-recap` missed background agents that started and finished between two 5-second looks, so busy days showed 0 hand-ins. Agents first seen already completed or failed now count (the first look after loading is only a baseline, so earlier work is not recounted). The recap also listens for the host's subagent-stop event, so an agent is counted even if the list drops it before the next look; each agent is counted once per finish.
 
 ## 0.11.0 — 2026-10-11
 Make the Boss yours.

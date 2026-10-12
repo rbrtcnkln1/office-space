@@ -24,6 +24,10 @@ SETTINGS = {
     "hand-in":     {"stride": 2, "fps": 16, "hold": 1.0},
     "remote-crew": {"stride": 2, "fps": 11, "hold": 1.0},
     "break-room":  {"stride": 2, "fps": 18, "hold": 1.0},
+    "boss-makeover":   {"stride": 2, "fps": 8,  "hold": 1.0},
+    "office-makeover": {"stride": 2, "fps": 15, "hold": 1.0},
+    "themes":          {"stride": 2, "fps": 10, "hold": 1.0},
+    "team":            {"stride": 2, "fps": 10, "hold": 1.0},
     # README top banner: big phone-readable captions, title and end cards
     "explainer":   {"stride": 2, "fps": 16, "hold": 0.0, "bar_h": 70, "font": 27},
 }

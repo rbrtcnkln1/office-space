@@ -8,8 +8,16 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Office } from '../../plugin/hooks/office'
+import { readFileSync } from 'node:fs'
+import { Office, portraitSvg } from '../../plugin/hooks/office'
 import type { AgentLike } from '../../plugin/hooks/office'
+import { DEFAULT_LOOK } from '../../plugin/hooks/catalog'
+import type { BossLook } from '../../plugin/hooks/catalog'
+import { gridProblem, libraryMap, makePart, resolveParts } from '../../plugin/hooks/parts'
+import type { PartSlot } from '../../plugin/hooks/parts'
+import { PRESETS } from '../../plugin/hooks/theme'
+import type { Team } from '../../plugin/hooks/team'
+import type { OfficeLook } from '../../plugin/hooks/decor'
 
 const OUT = process.argv[2] ?? join(import.meta.dir, '.work', 'frames')
 const ONLY = process.argv.slice(3)
@@ -162,6 +170,134 @@ const scenes: Record<string, () => Scene> = {
     s.set('backup', { status: 'waiting', remote: { need: 'blocked', note: 'Disk is full, free some space' } })
     beat('Red ! = a human is needed', 80)
     beat('@end', 110)
+    return s
+  },
+
+  // f. Boss makeover: the Boss cycles through looks. Left is always the default
+  //    Boss, right is the new look, with a little puff of smoke at each change.
+  //    The drawn cowboy hat is the hand-made example in examples/drawn-parts.json.
+  'boss-makeover'() {
+    const s = new Scene('boss-makeover', 31)
+    const raw = JSON.parse(readFileSync(new URL('../../examples/drawn-parts.json', import.meta.url), 'utf8')) as { name: string; slot: PartSlot; rows: string[] }[]
+    const parts = raw.map(p => {
+      const why = gridProblem(p.slot, p.rows)
+      if (why) throw new Error(`${p.name}: ${why}`)
+      return makePart(p.name, p.slot, p.rows)
+    })
+    const lib = libraryMap(parts)
+    const id = (name: string) => (parts.find(p => p.name === name) as { id: string }).id
+    const fig = (look: BossLook) => {
+      const p = resolveParts(look.parts, lib)
+      return { role: 'boss' as const, look, ...(p ? { parts: p } : {}) }
+    }
+    const looks: { look: BossLook; caption: string }[] = [
+      { look: { ...DEFAULT_LOOK }, caption: 'The Boss, as shipped.' },
+      { look: { hair: 'frosted', hairColor: 'pink', outfit: 'early-2000s', accessory: 'headphones' }, caption: '/office-space-boss pink frosted hair and a track jacket' },
+      { look: { hair: 'short', hairColor: 'gray', outfit: 'tee', accessory: 'headphones', top: 'white', bottom: 'denim' }, caption: '/office-space-boss silver hair, a white tee, jeans, headphones' },
+      { look: { hair: 'short', hairColor: 'gray', outfit: 'tee', accessory: 'headphones', top: 'white', bottom: 'denim', parts: { hat: id('cowboy hat'), shoes: id('white sneakers') } }, caption: '/office-space-boss a cowboy hat  (Draw it)' },
+    ]
+    const SCALE = 14
+    const puff = (n: number) => {
+      const cx = 36, cy = 14
+      const dots = [[-6, -2], [6, -3], [-4, 6], [5, 5], [0, -8], [-8, 3], [8, 2]]
+      return dots.map(([dx, dy], i) => `<circle cx="${cx + (dx as number) * (0.5 + n * 0.35)}" cy="${cy + (dy as number) * (0.5 + n * 0.35)}" r="${1.2 + n * 0.9 - (i % 2) * 0.5}" fill="#fff" opacity="${0.95 - n * 0.2}"/>`).join('')
+    }
+    const frame = (look: BossLook, caption: string, smoke = -1) => {
+      let svg = portraitSvg([fig(DEFAULT_LOOK), fig(look)], SCALE)
+      if (smoke >= 0) svg = svg.replace('</svg>', `${puff(smoke)}</svg>`)
+      s.frames.push({ svg, caption })
+    }
+    looks.forEach((l, i) => {
+      if (i > 0) for (let n = 0; n < 4; n++) frame(l.look, l.caption, n)
+      for (let n = 0; n < (i === 0 ? 20 : 26); n++) frame(l.look, l.caption)
+    })
+    for (let n = 0; n < 4; n++) frame(DEFAULT_LOOK, '/office-space-boss reset', n)
+    for (let n = 0; n < 16; n++) frame(DEFAULT_LOOK, '/office-space-boss reset')
+    return s
+  },
+
+  // g. Office makeover: decorate step by step, then a worker visits the vending machine.
+  'office-makeover'() {
+    const s = new Scene('office-makeover', 17)
+    const o = s.office as any
+    s.agents = [job('a1', 'Build the new feature'), job('a2', 'Write the docs'), job('a3', 'Review the open pull request')]
+    s.sync()
+    for (let i = 0; i < 90; i++) s.office.step()
+    const look: OfficeLook = { wall: 'slate', floor: 'slate-tiles', items: {} }
+    const apply = (caption: string, patch: Partial<OfficeLook>, items: Record<string, string> = {}, ticks = 14) => {
+      s.office.decor = { ...look, ...patch, items: { ...look.items, ...items } }
+      Object.assign(look, s.office.decor)
+      s.run(ticks, caption)
+    }
+    s.run(16, 'The plain office.')
+    apply('/office-space-office teal walls', { wall: 'teal' })
+    apply('/office-space-office an oak plank floor', { floor: 'oak-planks' })
+    apply('/office-space-office a vending machine', {}, { break: 'vending-machine' })
+    apply('/office-space-office an arcade cabinet', {}, { 'bottom-1': 'arcade-cabinet' })
+    apply('/office-space-office a couch', {}, { 'bottom-3': 'couch' })
+    apply('/office-space-office a lava lamp', {}, { 'bottom-4': 'lava-lamp' })
+    apply('/office-space-office a fish tank', {}, { 'bottom-5': 'fish-tank' }, 20)
+    apply('And a rocket poster by the door', {}, { 'wall-door': 'poster-rocket' }, 14)
+    const w = o.workers.get('a2')
+    o.takeBreak(w, 'vending')
+    s.run(2, 'The vending machine works: workers walk over on breaks...')
+    s.until(() => w.activity === 'vending', 120)
+    s.run(26, '...feed it a coin...')
+    s.until(() => !!w.item, 80, '...and come back with a snack.')
+    s.until(() => w.seated, 200)
+    s.run(24, '...and come back with a snack.')
+    return s
+  },
+
+  // h. Themes: the same office flips between the three built-in presets.
+  themes() {
+    const s = new Scene('themes', 23)
+    const o = s.office as any
+    const t = (id: string, description: string) => ({ id, description, type: 'general-purpose', status: 'running' }) as AgentLike
+    s.agents = [t('a1', 'Build the new feature'), t('a2', 'Write the docs'), t('a3', 'Review the open pull request'), t('a4', 'Research card routing'), t('a5', 'Plan the roadmap')]
+    s.sync()
+    for (let i = 0; i < 100; i++) s.office.step()
+    s.run(18, 'The plain office.')
+    for (const p of PRESETS) {
+      o.bossLook = p.boss
+      s.office.setTeam(p.team as Team | undefined)
+      s.office.decor = p.office
+      s.run(46, `/office-space-theme load ${p.name}`)
+    }
+    o.bossLook = undefined
+    s.office.setTeam(undefined)
+    s.office.decor = undefined
+    s.run(30, '/office-space-theme reset')
+    return s
+  },
+
+  // i. Team: roles renamed and restyled, long tasks wrapping under the desks.
+  team() {
+    const s = new Scene('team', 41)
+    const t = (id: string, description: string) => ({ id, description, type: 'general-purpose', status: 'running' }) as AgentLike
+    s.agents = [
+      t('c1', 'Implement the new payments feature with saved cards and receipts'),
+      t('c2', 'Write the welcome guide for new teammates joining this month'),
+      t('c3', 'Review the open pull request'),
+      t('c4', 'Research card routing across regions'),
+      t('c5', 'Plan the roadmap'),
+    ]
+    s.sync()
+    for (let i = 0; i < 110; i++) s.office.step()
+    const team: Team = { titles: {}, looks: {} }
+    const set = (caption: string, f: (t: Team) => void, ticks = 36) => {
+      f(team)
+      s.office.setTeam(JSON.parse(JSON.stringify(team)))
+      s.run(ticks, caption)
+    }
+    s.run(20, 'The built-in team.')
+    set('/office-space-team call the Coder "Mx. Bytes"', t => { t.titles.coder = 'Mx. Bytes' })
+    set('/office-space-team give the Writer a cardigan and a scarf', t => { t.titles.writer = 'Scribe'; t.looks.writer = { outfit: 'cardigan', accessory: 'scarf' } })
+    set('/office-space-team Coder: curly pink hair, navy hoodie, headphones', t => { t.looks.coder = { hair: 'curly', hairColor: 'pink', outfit: 'hoodie', top: 'navy', accessory: 'headphones' } })
+    set('/office-space-team the Reviewer: blue hair and a cap', t => { t.titles.reviewer = 'Nitpicker'; t.looks.reviewer = { hairColor: 'blue', accessory: 'cap' } })
+    s.run(50, 'Long tasks wrap onto two lines under each desk.')
+    set('/office-space-team Researcher: purple top, denim trousers', t => { t.looks.researcher = { outfit: 'tee', top: 'purple', bottom: 'denim' } })
+    set('/office-space-team call the Planner "Librarian", give them a bob', t => { t.titles.planner = 'Librarian'; t.looks.planner = { hair: 'bob', outfit: 'lab-coat' } }, 50)
     return s
   },
 

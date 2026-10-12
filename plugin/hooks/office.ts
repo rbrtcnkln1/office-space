@@ -12,6 +12,8 @@ import {
 import type { Dir, Grid, Palette, RoleId } from './sprites'
 import { sanitize } from './external'
 import type { RemoteInfo } from './external'
+import { usageTray, usageWall } from './usageart'
+import type { UsageBoard } from './usage'
 
 // ---------- Tunables ----------
 
@@ -111,7 +113,7 @@ type Packet = { from: Pt; to: Pt; t: number; dur: number; err: boolean }
 
 // ---------- Helpers ----------
 
-function hash(s: string): number {
+export function hash(s: string): number {
   let h = 0
   for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0
   return h
@@ -238,6 +240,8 @@ export class Office {
   packets: Packet[] = []
   tick = 0
   bossWorking = false
+  usage: UsageBoard | null = null // drawn as the in-tray, wall clock and calendar when set (see ./usageart.ts)
+  clockNow = 0 // fixed time for the usage objects (media scenes); 0 = the real time
   private initialized = false
 
   constructor() {
@@ -745,6 +749,7 @@ export class Office {
     out.push(`<rect width="${W}" height="${H}" fill="${FLOOR}"/>`)
     out.push(floorSeams(W, H))
     out.push(this.backWall())
+    if (this.usage) out.push(usageWall(this.usage, this.bossX() + 71, WALL_TOP, this.clockNow || Date.now()))
     // title
     out.push(`<text x="4" y="8" font-family="ui-monospace,Menlo,monospace" font-size="6" font-weight="700" fill="#c0392b">◆ OFFICE SPACE</text>`)
     out.push(`<text x="60" y="8" font-family="ui-monospace,Menlo,monospace" font-size="5" fill="#2b3550">${esc(this.summary())}</text>`)
@@ -761,6 +766,7 @@ export class Office {
     add(by + 28, place(bx + 4, by + 15, STATIC.bossDesk))
     add(by + 28.1, place(bx + 52, by + 8, gridSvg('laptop', laptopGrid(true), FURN_PAL)))
     add(by + 28.1, place(bx + 8, by + 8, STATIC.plant))
+    if (this.usage) add(by + 28.2, usageTray(this.usage, bx + 77, by + 14))
     add(by + 28.1, place(bx + 70, by + 7, gridSvg('mug', icon('mug'), FURN_PAL)))
     out.push(`<text x="${bx + 4 + 44}" y="${by + 36}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="4" font-weight="700" fill="#2b3550">THE BOSS</text>`)
 

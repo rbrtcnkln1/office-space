@@ -8,6 +8,10 @@
 //   /office-space-help   list every command and setting
 //   /office-space-update check for a newer version and update
 //   /office-space-feedback report a bug or share an idea
+//   /office-space-roster   who is at work and what each one is doing
+//   /office-space-recap    today's hand-ins, failures and calls for a person
+//   /office-space-usage    context fill, plan limits and cost
+//   /office-space-workers  the outside-workers folder, what was read, what was skipped
 // Each command is one row of COMMANDS below.
 //
 // Work running outside the session appears too: any script can drop one JSON
@@ -18,13 +22,17 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 
-import { FLOOR, Office, SCALE } from './office'
+import { ACTIVE, FLOOR, Office, SCALE } from './office'
 import { ROLES } from './sprites'
 import type { AgentLike } from './office'
-import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, expandDir, inScope, alertText, isWorkerFile, newlyNeeding, normalizePath, parseWorker, toAgents } from './external'
+import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, classifyWorker, expandDir, inScope, alertText, isWorkerFile, newlyNeeding, normalizePath, parseWorker, toAgents } from './external'
 import type { ExternalWorker } from './external'
 import { compareVersions, feedbackText, installedVersion, latestVersion, parseVersion, toastText, updateOffice } from './update'
 import type { UpdateIo } from './update'
+import { DayTracker, ROSTER_SYSTEM, activityDigest, parseSummaries, recapText, rosterPrompt, rosterText, workersReport } from './info'
+import type { FileInfo, RosterRow } from './info'
+import { fmtSpan, toBoard, usageText } from './usage'
+import type { UsageBoard } from './usage'
 
 const open = atom({ plugin: 'office-space', key: 'open' } as const, false)
 const selected = atom({ plugin: 'office-space', key: 'selected' } as const, '') // the worker whose note is showing
@@ -37,6 +45,12 @@ let checkForUpdates = false
 let alertOnBlocked = true
 const ALERT_EVERY_MS = 5000
 let alertTimer: { cancel: () => void } | null = null
+let showUsage = true
+let usageBoard: UsageBoard | null = null // last usage figures the host gave (drawn as office objects when showUsage)
+const DAY_EVERY_MS = 5000
+let dayTimer: { cancel: () => void } | null = null
+const tracker = new DayTracker() // today's hand-ins, failures and calls for a person
+const seenAt = new Map<string, number>() // when an agent was first seen at work, for "time at it"
 let needKnown: Set<string> = new Set() // workers in a waiting/blocked stint (so a stint toasts once)
 let alertQuiet = true // the first look after startup only records who is already waiting
 const TICK_MS = 100
@@ -194,10 +208,53 @@ async function watchAlerts($: EngineInterface): Promise<void> {
   } catch {}
 }
 
-/** Employee of the Day counts are kept per calendar day, across reloads. */
-function eotdKey(): string {
+/** Employee of the Day counts and the recap are kept per calendar day, across reloads. */
+const dayStamp = (): string => {
   const d = new Date()
-  return `eotd:${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+}
+function eotdKey(): string {
+  return `eotd:${dayStamp()}`
+}
+const dayKey = (): string => `day:${dayStamp()}`
+
+/** Usage figures to the office (or none when the setting hides them). */
+function applyUsage(): void {
+  office.usage = showUsage ? usageBoard : null
+}
+async function refreshUsage($: EngineInterface): Promise<void> {
+  try {
+    usageBoard = toBoard(await $.session.usage())
+    applyUsage()
+  } catch {}
+}
+
+/**
+ * Watches agents and outside workers for the day's recap, whether or not the
+ * office is open. One small local read every few seconds; writes only when the
+ * tally changes. Never throws.
+ */
+async function dayTick($: EngineInterface): Promise<void> {
+  try {
+    const key = dayKey()
+    if (tracker.key !== key) {
+      let saved: unknown
+      try { saved = await $.store.get(key) } catch {}
+      tracker.rollover(key, saved)
+    }
+    let list: AgentInfo[] = []
+    try { list = await $.agent.list() } catch {}
+    const remote = toAgents(await visibleHere($, await readExternal($)), Date.now(), staleMinutes)
+    const all = [...(list as AgentLike[]), ...remote]
+    const live = new Set<string>()
+    for (const a of all) {
+      if (!ACTIVE.has(a.status)) continue
+      live.add(a.id)
+      if (!seenAt.has(a.id)) seenAt.set(a.id, Date.now())
+    }
+    for (const id of [...seenAt.keys()]) if (!live.has(id)) seenAt.delete(id)
+    if (tracker.observe(all)) await $.store.set(key, tracker.log)
+  } catch {}
 }
 async function loadEotd($: EngineInterface) {
   try {
@@ -269,6 +326,8 @@ async function setOpen($: EngineInterface, on: boolean) {
     // band keeps everyone where they are
     running = true
     office = new Office()
+    applyUsage()
+    void refreshUsage($)
     externalAt = 0
     resolvedDir = null
     await loadEotd($)
@@ -283,7 +342,7 @@ async function setOpen($: EngineInterface, on: boolean) {
 type Reply = { text: string }
 // A row decides what to do; the dispatcher below does it. Rows stay pure because
 // a module may not hand `$` to a function it looks up at run time.
-type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' }
+type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' | 'roster' | 'recap' | 'usage' | 'workers' }
 type Command = {
   name: string
   description: string
@@ -387,7 +446,161 @@ export const COMMANDS: Command[] = [
     description: 'Report a bug or share an idea (shows the link and your version details)',
     run: () => ({ action: 'feedback' }),
   },
+  {
+    name: 'office-space-roster',
+    description: 'Who is at work, for how long, and what each is doing (uses a little plan usage for the summaries)',
+    run: () => ({ action: 'roster' }),
+  },
+  {
+    name: 'office-space-recap',
+    description: "Today's hand-ins, failures, outside workers that needed you, and Employee of the Day",
+    run: () => ({ action: 'recap' }),
+  },
+  {
+    name: 'office-space-usage',
+    description: 'Context fill, plan limits with reset times, and cost',
+    run: () => ({ action: 'usage' }),
+  },
+  {
+    name: 'office-space-workers',
+    description: 'Show the outside-workers folder, who was read from it, and any files skipped and why',
+    run: () => ({ action: 'workers' }),
+  },
 ]
+
+const AGENT_LOOKS = 12 // transcripts read per roster (local reads, never the model)
+const ROSTER_MAX = 20
+const MODEL_TIMEOUT_MS = 20000
+
+async function rosterCommand($: EngineInterface): Promise<string> {
+  const now = Date.now()
+  let list: AgentInfo[] = []
+  try { list = await $.agent.list() } catch {}
+  const subs = (list as AgentLike[]).filter(a => ACTIVE.has(a.status))
+  let remote: AgentLike[] = []
+  try { remote = toAgents(await visibleHere($, await readExternal($)), now, staleMinutes).filter(a => ACTIVE.has(a.status)) } catch {}
+  const total = subs.length + remote.length
+  const pickSubs = subs.slice(0, ROSTER_MAX)
+  const pickRemote = remote.slice(0, Math.max(0, ROSTER_MAX - pickSubs.length))
+
+  const digests = await Promise.all(pickSubs.map(async (a, i) => {
+    if (i >= AGENT_LOOKS) return ''
+    try { return activityDigest(await $.session.messages({ agentId: a.id })) } catch { return '' }
+  }))
+  const rows: RosterRow[] = pickSubs.map((a, i) => {
+    if (!seenAt.has(a.id)) seenAt.set(a.id, now)
+    const at = seenAt.get(a.id) ?? now
+    const since = now - at < 5000 ? 'just noticed' : `${fmtSpan(now - at)} on it`
+    const name = a.name || ''
+    return {
+      who: (name && name !== a.type ? `${name} (${a.type})` : a.type || a.id).slice(0, 48),
+      state: a.status === 'running' ? 'working' : a.status === 'pending' ? 'starting' : a.status,
+      since,
+      task: a.description || '',
+      activity: digests[i] ?? '',
+    }
+  })
+  for (const a of pickRemote) {
+    const r = a.remote
+    rows.push({
+      who: `${a.name || a.id} [${r?.source ?? 'remote'}]`.slice(0, 48),
+      state: r?.need ?? (r?.stale ? 'working (stale)' : 'working'),
+      since: r && r.ageMin >= 1 ? `updated ${fmtSpan(r.ageMin * 60_000)} ago` : 'updated just now',
+      task: a.description || '',
+      activity: `reports ${r?.need ?? 'working'}${r?.note ? `; note: ${r.note}` : ''}`,
+    })
+  }
+
+  let summaries: ReturnType<typeof parseSummaries> = null
+  let note: string | null = null
+  const prompt = rosterPrompt(rows)
+  if (!rows.length) {
+    note = null
+  } else if (!prompt) {
+    note = "No recent activity to summarize yet, so each line shows the worker's own task text."
+  } else {
+    let why = ''
+    try {
+      const r = await $.model.complete({ model: 'haiku', system: ROSTER_SYSTEM, prompt, maxTokens: 700, effort: 'low', timeoutMs: MODEL_TIMEOUT_MS })
+      if (r.isAnswered) {
+        summaries = parseSummaries(r.text, rows.length)
+        if (!summaries) why = 'the reply could not be used'
+      } else {
+        why = r.reason === 'aborted' ? 'the call timed out' : r.reason === 'empty-reply' ? 'it sent no words' : 'the call failed (offline, or out of plan usage)'
+      }
+    } catch {
+      why = 'the model call is not available here'
+    }
+    if (!summaries) note = `AI summaries unavailable (${why}), so each line shows the worker's own task text.`
+  }
+  const text = rosterText(rows, summaries, note)
+  return total > rows.length ? `${text}
+${total - rows.length} more not shown.` : text
+}
+
+function recapCommand(): string {
+  return recapText(tracker.log)
+}
+
+async function usageCommand($: EngineInterface): Promise<string> {
+  try {
+    const fresh = toBoard(await $.session.usage())
+    if (fresh) {
+      usageBoard = fresh
+      applyUsage()
+    }
+  } catch {}
+  return usageText(usageBoard, Date.now())
+}
+
+async function workersCommand($: EngineInterface): Promise<string> {
+  const env = await $.env.get('OFFICE_SPACE_WORKERS_DIR')
+  const home = await $.env.get('HOME')
+  const dir = expandDir(env || workersDir, home)
+  const dirSource = env ? 'environment' : workersDir !== DEFAULT_DIR ? 'setting' : 'default'
+  let dirState: 'ok' | 'missing' | 'error' = 'ok'
+  let entries: Awaited<ReturnType<EngineInterface['fs']['list']>> = []
+  try {
+    entries = await $.fs.list(dir)
+  } catch {
+    let there = false
+    try { there = await $.fs.exists(dir) } catch {}
+    dirState = there ? 'error' : 'missing'
+  }
+  const sorted = [...entries].sort((a, b) => b.mtimeMs - a.mtimeMs)
+  let reads = 0
+  let notRead = 0
+  const files: FileInfo[] = []
+  for (const ent of sorted) {
+    const info: FileInfo = { name: ent.name, kind: ent.kind, isLink: ent.isLink, size: ent.size, mtimeMs: ent.mtimeMs }
+    if (ent.kind === 'file' && !ent.isLink && isWorkerFile(ent.name) && ent.size <= MAX_FILE_BYTES) {
+      if (reads >= MAX_FILES) { notRead++; continue }
+      reads++
+      try {
+        const t = await $.fs.read(`${dir}/${ent.name}`)
+        info.text = typeof t === 'string' ? t : null
+      } catch {
+        info.text = null
+      }
+    }
+    files.push(info)
+  }
+  // Workers scoped to some other folder do not show in this session.
+  const hidden = new Set<string>()
+  try {
+    const found: ExternalWorker[] = []
+    for (const f of files) {
+      if (typeof f.text !== 'string') continue
+      const r = classifyWorker(f.text, f.name, f.mtimeMs)
+      if ('worker' in r && r.worker.scope) found.push(r.worker)
+    }
+    if (found.length) {
+      const here = new Set((await visibleHere($, found)).map(w => w.id))
+      for (const w of found) if (!here.has(w.id)) hidden.add(w.id)
+    }
+  } catch {}
+  return workersReport({ dir, dirSource, dirState, files, notRead, now: Date.now(), staleMinutes, hiddenHere: hidden })
+}
 
 async function feedback($: EngineInterface): Promise<string> {
   let office: string | null = null
@@ -402,7 +615,18 @@ async function feedback($: EngineInterface): Promise<string> {
 async function runCommand($: EngineInterface, name: string, args: string): Promise<Reply> {
   const c = COMMANDS.find((x) => x.name === name)
   const out = c ? c.run(args) : { text: 'Unknown command. Type /office-space-help.' }
-  if ('action' in out) return { text: out.action === 'feedback' ? await feedback($) : await updateOffice(updateIo($)) }
+  if ('action' in out) {
+    try {
+      const a = out.action
+      if (a === 'roster') return { text: await rosterCommand($) }
+      if (a === 'recap') return { text: recapCommand() }
+      if (a === 'usage') return { text: await usageCommand($) }
+      if (a === 'workers') return { text: await workersCommand($) }
+      return { text: a === 'feedback' ? await feedback($) : await updateOffice(updateIo($)) }
+    } catch (err) {
+      return { text: `Office Space could not do that just now (${String(err).slice(0, 80)}). Nothing was changed.` }
+    }
+  }
   if ('toggle' in out) return out.toggle === 'panel' ? togglePanel($) : toggleBand($)
   return out
 }
@@ -413,7 +637,8 @@ export function helpText(): string {
     'Office Space commands:',
     ...lines,
     '',
-    'Settings (/plugin -> office-space -> configure): workersDir, staleMinutes, alertOnBlocked, checkForUpdates.',
+    'Settings (/plugin -> office-space -> configure): workersDir, staleMinutes, alertOnBlocked, checkForUpdates, showUsage.',
+    'Only /office-space-roster makes an AI call (one small-model request per run, outside your chat); everything else is local. None of it adds anything to your conversation.',
     'Docs: https://github.com/rbrtcnkln1/office-space#readme',
   ].join('\n')
 }
@@ -474,6 +699,8 @@ export const register: Register = (on, options) => {
   checkForUpdates = cu === true || cu === 'true'
   const ab = (options as { alertOnBlocked?: unknown } | undefined)?.alertOnBlocked
   alertOnBlocked = !(ab === false || ab === 'false')
+  const su = (options as { showUsage?: unknown } | undefined)?.showUsage
+  showUsage = !(su === false || su === 'false')
 
   on('session.start', async ($, e, next) => {
     for (const c of COMMANDS) {
@@ -492,6 +719,11 @@ export const register: Register = (on, options) => {
     paneOpen = await paneShowing($)
     if (paneOpen || bandOn) await setOpen($, true)
     if (checkForUpdates) void dailyUpdateCheck($)
+    void refreshUsage($)
+    if (!dayTimer) {
+      void dayTick($)
+      dayTimer = $.clock.every(DAY_EVERY_MS, () => { void dayTick($) })
+    }
     if (alertOnBlocked && !alertTimer) {
       void watchAlerts($)
       alertTimer = $.clock.every(ALERT_EVERY_MS, () => { void watchAlerts($) })
@@ -504,6 +736,19 @@ export const register: Register = (on, options) => {
   for (const c of COMMANDS) {
     on('command.run', { command: c.name }, async ($, e) => runCommand($, c.name, String(e.args ?? '')))
   }
+
+  // Usage figures moved (context, a limit window, cost): redraw the office objects.
+  on('session.measure', async ($, e, next) => {
+    try {
+      const b = toBoard(e)
+      if (b) {
+        usageBoard = b
+        applyUsage()
+        if (running) $.ui.invalidate('ui.render')
+      }
+    } catch {}
+    return next(e)
+  })
 
   // The person closing the panel with its close mark.
   on('ui.close', { id: PANE }, async ($, e, next) => {

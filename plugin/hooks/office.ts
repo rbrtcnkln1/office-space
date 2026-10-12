@@ -11,6 +11,10 @@ import {
 } from './sprites'
 import type { Dir, Grid, Palette, RoleId } from './sprites'
 import type { BossLook } from './catalog'
+import { DEFAULT_FLOOR, DEFAULT_WALL, SOUTH_H, floorOf, hasSouth, itemOf, pieceAt, slotOf, wallOf } from './decor'
+import type { Geometry, OfficeLook } from './decor'
+import { FRAMES, DECOR_PAL, floorSvg, itemGrid } from './decorart'
+import type { Team } from './team'
 import { sanitize } from './external'
 import type { RemoteInfo } from './external'
 import { usageTray, usageWall } from './usageart'
@@ -61,9 +65,10 @@ type Step =
   | { k: 'activity'; kind: Activity; ticks: number }
   | { k: 'do'; fn: () => void }
 
-export type Activity = 'cooler' | 'trash' | 'gym' | 'chat' | 'station'
+export type Activity = 'cooler' | 'trash' | 'gym' | 'chat' | 'station' | 'vending'
 export type Item = 'coffee' | 'tea' | 'water' | 'soda' | 'donut' | 'cookie'
 const STATION_ITEMS: Item[] = ['coffee', 'coffee', 'tea', 'soda', 'donut', 'cookie']
+const VENDING_ITEMS: Item[] = ['soda', 'soda', 'donut', 'cookie'] // what the vending machine (a decor piece) gives out
 const BOSS_ERRAND_CHANCE = 1 / 700 // per tick while the Boss is free
 const SIP_TICKS = 70
 const LOUNGE_AFTER = 30 // ticks of nothing to do before the Boss kicks back
@@ -120,6 +125,26 @@ export function hash(s: string): number {
   return h
 }
 const short = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
+/** Desk label: 4 px monospace is ~2.4 px a char; a 64 px cell minus 3 px clear each side holds 24. */
+export const LABEL_CHARS = 24
+export const LABEL_LINES = 2
+/** Wrap on word boundaries (hard-breaking a word longer than a line) into at most maxLines lines; cut text ends in an ellipsis. */
+export function wrapLabel(text: string, maxChars = LABEL_CHARS, maxLines = LABEL_LINES): string[] {
+  const tokens: string[] = []
+  for (const w of text.split(/\s+/)) for (let i = 0; i < w.length; i += maxChars) tokens.push(w.slice(i, i + maxChars))
+  const lines: string[] = []
+  let cur = ''
+  for (const t of tokens) {
+    if (cur && cur.length + 1 + t.length > maxChars) { lines.push(cur); cur = t } else cur = cur ? cur + ' ' + t : t
+  }
+  if (cur) lines.push(cur)
+  if (lines.length > maxLines) {
+    lines.length = maxLines
+    const last = lines[maxLines - 1] ?? ''
+    lines[maxLines - 1] = (last.length >= maxChars ? last.slice(0, maxChars - 1) : last) + '…'
+  }
+  return lines
+}
 // control characters are invalid in XML and would break the whole drawing
 const esc = (s: string) => sanitize(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string)
 
@@ -245,6 +270,10 @@ export class Office {
   clockNow = 0 // fixed time for the usage objects (media scenes); 0 = the real time
   /** The Boss's customization (catalog ids), or none for the default look. */
   bossLook: BossLook | undefined = undefined
+  /** The office's decoration (wall, floor, furniture), or none for the plain office. */
+  decor: OfficeLook | undefined = undefined
+  /** Team titles, looks and starting desk count (see ./team.ts), or none for the defaults. */
+  team: Team | undefined = undefined
   private initialized = false
 
   constructor() {
@@ -252,11 +281,30 @@ export class Office {
     this.boss = { pos: seat, facing: 'down', seated: true, plan: [], walkFrame: 0, reaching: false, carrying: false, react: null, reactUntil: 0, ambientUntil: 0, missions: [], errand: false, atStation: false, item: null, sipUntil: 0, idleTicks: 0 }
   }
 
+  /** What a role is called on the floor: the team's title, or the built-in one. */
+  titleOf(role: RoleId): string {
+    return (role !== 'boss' && this.team?.titles[role]) || ROLES[role].title
+  }
+
+  /** Sets the team customization; the desk count follows the layout rules (never yanks an occupied desk). */
+  setTeam(team: Team | undefined) {
+    this.team = team
+    this.layout()
+  }
+  private startDesks() { return Math.max(MIN_DESKS, this.team?.desks ?? 0) }
+
   // ----- geometry -----
   get rows() { return Math.ceil(this.desks.length / this.cols) }
   get annexRows() { return Math.ceil(this.annex.length / this.cols) }
   get width() { return MARGIN * 2 + this.cols * CELL_W }
-  get height() { return (this.annexRows ? this.annexRowY(this.annexRows - 1) : this.rowY(this.rows - 1)) + 46 }
+  /** The room without the bottom-wall strip that furniture along it adds. */
+  get baseHeight() { return (this.annexRows ? this.annexRowY(this.annexRows - 1) : this.rowY(this.rows - 1)) + 48 }
+  get height() { return this.baseHeight + (hasSouth(this.decor) ? SOUTH_H : 0) }
+  /** The numbers the decor slots are placed from (see ./decor.ts). */
+  geometry(): Geometry { return { W: this.width, baseH: this.baseHeight, tableX: this.tableX(), stationX: this.stationX() } }
+  /** The floor color, which also fills the panel around the drawing. */
+  floorColor(): string { return floorOf(this.decor?.floor ?? DEFAULT_FLOOR)?.base ?? FLOOR }
+  private hasVending() { return Object.values(this.decor?.items ?? {}).includes('vending-machine') }
   /** Top of the first annex row: one desk row below the last local one, plus room for the sign. */
   annexRowY(r: number) { return this.rowY(this.rows) + ANNEX_GAP + r * ROW_H }
   bossX() { return MARGIN + 6 } // left, right by the door
@@ -285,6 +333,7 @@ export class Office {
     if (kind === 'station') return { x: this.stationX() + 2, y: 30 }
     if (kind === 'trash') return { x: W - 98, y: 32 }
     if (kind === 'gym') return { x: this.bossRight() + 10, y: 40 }
+    if (kind === 'vending') return { x: this.stationX() + 23, y: 34 }
     const t = this.tableX()
     return side === 0 ? { x: t - 15, y: 30 } : { x: t + 27, y: 30 }
   }
@@ -317,7 +366,7 @@ export class Office {
 
   private layoutMain() {
     const holding = [...this.workers.values()].filter(w => w.desk >= 0 && w.desk < ANNEX).length
-    const want = Math.max(MIN_DESKS, holding + SPARE_DESKS)
+    const want = Math.max(this.startDesks(), holding + SPARE_DESKS)
     const walking = [...this.workers.values()].some(w => w.plan.length) || this.boss.plan.length > 0
     if (want < this.desks.length && walking) return
     if (want === this.desks.length) return
@@ -553,8 +602,8 @@ export class Office {
     const slot = w.desk
     const spot = this.areaSpot(kind, side)
     const aisle = this.aisleY()
-    const dur = ticks || (kind === 'gym' ? 50 : kind === 'trash' ? 20 : kind === 'chat' ? 60 : kind === 'station' ? 24 : 40)
-    const item: Item | null = kind === 'cooler' ? 'water' : kind === 'station' ? (STATION_ITEMS[Math.floor(Math.random() * STATION_ITEMS.length)] as Item) : null
+    const dur = ticks || (kind === 'gym' ? 50 : kind === 'trash' ? 20 : kind === 'chat' ? 60 : kind === 'station' ? 24 : kind === 'vending' ? 26 : 40)
+    const item: Item | null = kind === 'cooler' ? 'water' : kind === 'station' ? (STATION_ITEMS[Math.floor(Math.random() * STATION_ITEMS.length)] as Item) : kind === 'vending' ? (VENDING_ITEMS[Math.floor(Math.random() * VENDING_ITEMS.length)] as Item) : null
     w.seated = false
     w.plan = [
       { k: 'walk', path: [...this.fromDesk(slot), { x: spot.x, y: aisle }, spot], speed: SPEED },
@@ -639,7 +688,11 @@ export class Office {
     for (const w of this.workers.values()) {
       if (!w.seated || w.plan.length || w.ending || w.desk < 0) continue
       const chance = w.status === 'running' ? BREAK_CHANCE_BUSY : BREAK_CHANCE_IDLE
-      if (Math.random() < chance) this.takeBreak(w, (['cooler', 'trash', 'gym', 'station', 'station'] as const)[Math.floor(Math.random() * 5)] as Activity)
+      if (Math.random() < chance) {
+        // a vending machine in the room is one more place to go (only then does the pick change)
+        const kinds: Activity[] = this.hasVending() ? ['cooler', 'trash', 'gym', 'station', 'station', 'vending'] : ['cooler', 'trash', 'gym', 'station', 'station']
+        this.takeBreak(w, kinds[Math.floor(Math.random() * kinds.length)] as Activity)
+      }
     }
     // the door opens for anyone in the doorway
     const d = this.door()
@@ -749,8 +802,12 @@ export class Office {
     const W = this.width
     const H = Math.max(this.height, Math.round(W * minAspect))
     const out: string[] = []
-    out.push(`<rect width="${W}" height="${H}" fill="${FLOOR}"/>`)
-    out.push(floorSeams(W, H))
+    const floor = this.decor && this.decor.floor !== DEFAULT_FLOOR ? floorOf(this.decor.floor) : undefined
+    if (floor) out.push(floorSvg(floor, W, H))
+    else {
+      out.push(`<rect width="${W}" height="${H}" fill="${FLOOR}"/>`)
+      out.push(floorSeams(W, H))
+    }
     out.push(this.backWall())
     if (this.usage) out.push(usageWall(this.usage, this.bossX() + 71, WALL_TOP, this.clockNow || Date.now()))
     // title
@@ -837,11 +894,12 @@ export class Office {
       }
       // label: status dot + role centred under the desk, the task right below
       const mid = c.x + 32
-      const titleW = role.title.length * 3
+      const title = this.titleOf(here.role)
+      const titleW = title.length * 3
       out.push(`<rect x="${Math.round(mid - titleW / 2 - 5)}" y="${c.y + 31}" width="3" height="3" fill="${this.dot(here)}"/>`)
-      out.push(`<text x="${mid}" y="${c.y + 35}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" font-weight="700" fill="#22304a">${esc(role.title)}</text>`)
+      out.push(`<text x="${mid}" y="${c.y + 35}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="5" font-weight="700" fill="#22304a">${esc(title)}</text>`)
       const sub = rm?.stale ? `stale ${rm.ageMin}m · ${here.label}` : rm?.need && rm.note ? rm.note : here.label
-      out.push(`<text x="${mid}" y="${c.y + 41}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="4" fill="${rm?.need && !rm.stale ? '#8e2a20' : '#33445f'}">${esc(short(sub, 30))}</text>`)
+      wrapLabel(sub).forEach((ln, i) => out.push(`<text x="${mid}" y="${c.y + 41 + i * 5}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="4" fill="${rm?.need && !rm.stale ? '#8e2a20' : '#33445f'}">${esc(ln)}</text>`))
       const seat = this.seatOf(slot)
       const typing = here.status === 'running'
       const frame = typing ? Math.floor((f + here.seed) / 2) % 4 : Math.floor((f + here.seed) / 6) % 2
@@ -857,6 +915,7 @@ export class Office {
 
     // break area furniture
     for (const d of this.breakArea()) add(d.z, d.svg)
+    for (const d of this.decorPieces()) add(d.z, d.svg)
 
     // walking (and breaking) workers
     for (const w of this.workers.values()) {
@@ -870,7 +929,7 @@ export class Office {
       }
       const pose = w.reaching ? 'reach' : w.activity || w.plan[0]?.k === 'queue' ? 'stand' : 'walk'
       add(w.pos.y + 20.5, this.charSvg(w.role, w.facing, pose, w.walkFrame, false, false, false, w.pos))
-      if ((w.activity === 'cooler' || w.activity === 'station') && Math.floor(f / 10) % 2) add(999, place(w.pos.x + 12, w.pos.y - 7, gridSvg('dots', BUBBLE_DOTS, FURN_PAL)))
+      if ((w.activity === 'cooler' || w.activity === 'station' || w.activity === 'vending') && Math.floor(f / 10) % 2) add(999, place(w.pos.x + 12, w.pos.y - 7, gridSvg('dots', BUBBLE_DOTS, FURN_PAL)))
       if (w.item) add(w.pos.y + 20.7, this.itemSvg(w.item, w.pos, false, f))
       if (w.activity === 'chat' && Math.floor((f + w.seed) / 7) % 2) add(999, place(w.pos.x + 10, w.pos.y - 7, gridSvg('dots', BUBBLE_DOTS, FURN_PAL)))
       if (w.carrying && !w.reaching) {
@@ -896,8 +955,9 @@ export class Office {
   private backWall(): string {
     const W = this.width
     const o: string[] = []
-    o.push(`<rect x="0" y="${WALL_TOP}" width="${W}" height="${WALL_BOTTOM - WALL_TOP}" fill="#6f86a3"/>`)
-    o.push(`<rect x="0" y="${WALL_BOTTOM - 2}" width="${W}" height="2" fill="#4e6380"/>`)
+    const paint = wallOf(this.decor?.wall ?? DEFAULT_WALL) ?? { wall: '#6f86a3', base: '#4e6380' }
+    o.push(`<rect x="0" y="${WALL_TOP}" width="${W}" height="${WALL_BOTTOM - WALL_TOP}" fill="${paint.wall}"/>`)
+    o.push(`<rect x="0" y="${WALL_BOTTOM - 2}" width="${W}" height="2" fill="${paint.base}"/>`)
     // windows
     for (const wx of [this.bossX() + 36, this.tableX() - 4]) {
       o.push(`<rect x="${wx}" y="${WALL_TOP + 3}" width="24" height="13" fill="#38566f"/><rect x="${wx + 1}" y="${WALL_TOP + 4}" width="22" height="11" fill="#a9c4dc"/><rect x="${wx + 11}" y="${WALL_TOP + 4}" width="2" height="11" fill="#38566f"/><rect x="${wx + 1}" y="${WALL_TOP + 9}" width="22" height="1" fill="#38566f"/>`)
@@ -918,9 +978,10 @@ export class Office {
     const best = [...this.eotd.entries()].sort((a, b) => b[1] - a[1])[0]
     if (best) {
       const [role, n] = best
-      const face = character({ role, dir: 'down', pose: 'stand', frame: 0 }).slice(0, 10).map(r => r.slice(3, 13))
-      o.push(place(sx + 3, sy + 8, `<g transform="scale(0.8)">${gridSvg(`eotd-${role}`, face, paletteFor(role))}</g>`))
-      o.push(`<text x="${sx + 13}" y="${sy + 12.5}" font-family="ui-monospace,Menlo,monospace" font-size="3" font-weight="700" fill="#22304a">${esc(ROLES[role].title)}</text>`)
+      const look = this.lookOf(role)
+      const face = character({ role, dir: 'down', pose: 'stand', frame: 0, ...(look ? { look } : {}) }).slice(0, 10).map(r => r.slice(3, 13))
+      o.push(place(sx + 3, sy + 8, `<g transform="scale(0.8)">${gridSvg(`eotd-${role}-${lookKey(look)}`, face, paletteFor(role, look))}</g>`))
+      o.push(`<text x="${sx + 13}" y="${sy + 12.5}" font-family="ui-monospace,Menlo,monospace" font-size="3" font-weight="700" fill="#22304a">${esc(this.titleOf(role))}</text>`)
       o.push(`<text x="${sx + 13}" y="${sy + 16}" font-family="ui-monospace,Menlo,monospace" font-size="3" fill="#33445f">${n} handed in</text>`)
     } else {
       o.push(`<text x="${sx + 22}" y="${sy + 14}" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="3" fill="#33445f">nobody yet</text>`)
@@ -963,8 +1024,35 @@ export class Office {
     return d
   }
 
+  /** The decor pieces as z-sorted drawables (nothing for the plain office). Animated ones pick a frame from the tick. */
+  private decorPieces(): Array<{ z: number; svg: string }> {
+    const look = this.decor
+    if (!look) return []
+    const g = this.geometry()
+    const out: Array<{ z: number; svg: string }> = []
+    const visiting = [...this.workers.values()].some(w => w.activity === 'vending')
+    for (const [slot, id] of Object.entries(look.items)) {
+      const it = itemOf(id)
+      if (!it || !slotOf(slot) || it.place !== slotOf(slot)?.place) continue
+      const n = FRAMES[id] ?? 1
+      const frame = id === 'vending-machine' ? (visiting ? 3 : Math.floor(this.tick / 12) % 2) : n > 1 ? Math.floor(this.tick / (id === 'fish-tank' ? 5 : 8)) % n : 0
+      const gr = itemGrid(id, frame)
+      if (!gr) continue
+      const at = pieceAt(id, slot, g)
+      // wall pieces are behind everything; the machine stands with the rest of the break area; the rest sit on the bottom wall
+      const z = it.place === 'wall' ? 1 : it.place === 'break' ? 49 : at.y + it.h
+      out.push({ z, svg: place(at.x, at.y, gridSvg(`decor-${id}-${frame % n}`, gr, DECOR_PAL)) })
+    }
+    return out
+  }
+
+  /** The look a role draws with: the Boss's, a team member's (parts only), or none. */
+  private lookOf(role: RoleId): Partial<BossLook> | undefined {
+    return role === 'boss' ? this.bossLook : this.team?.looks[role]
+  }
+
   private charSvg(role: RoleId, dir: Dir, pose: 'stand' | 'walk' | 'seat' | 'reach' | 'lounge', frame: number, typing: boolean, blink: boolean, nod: boolean, pos: Pt): string {
-    const look = role === 'boss' ? this.bossLook : undefined
+    const look = this.lookOf(role)
     const key = `c-${role}-${dir}-${pose}-${frame}-${typing}-${blink}-${nod}-${lookKey(look)}`
     return place(pos.x, pos.y, gridSvg(key, character({ role, dir, pose, frame, typing, blink, nod, ...(look ? { look } : {}) }), paletteFor(role, look)))
   }
@@ -997,7 +1085,7 @@ export class Office {
   }
 
   textLines(): Array<{ dot: string; title: string; label: string }> {
-    return [...this.workers.values()].map(w => ({ dot: this.dot(w), title: ROLES[w.role].title, label: w.remote ? this.remoteLabel(w, w.remote) : w.label }))
+    return [...this.workers.values()].map(w => ({ dot: this.dot(w), title: this.titleOf(w.role), label: w.remote ? this.remoteLabel(w, w.remote) : w.label }))
   }
 
   /** External workers waiting on a human right now (fresh, not leaving): what a press shows. */
@@ -1006,7 +1094,7 @@ export class Office {
     for (const w of this.workers.values()) {
       const r = w.remote
       if (!r?.need || r.stale || w.ending) continue
-      out.push({ id: w.id, who: w.name || ROLES[w.role].title, dot: this.dot(w), need: r.need, source: r.source, task: w.label, ...(r.note ? { note: r.note } : {}), ...(r.url ? { url: r.url } : {}) })
+      out.push({ id: w.id, who: w.name || this.titleOf(w.role), dot: this.dot(w), need: r.need, source: r.source, task: w.label, ...(r.note ? { note: r.note } : {}), ...(r.url ? { url: r.url } : {}) })
     }
     return out
   }

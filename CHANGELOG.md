@@ -2,6 +2,17 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## 0.12.0 — 2026-10-11
+Make the whole office yours: decorate the room, rename and restyle the team, and save it all as a theme.
+- New `/office-space-office`: decorate the office. Pick from 9 wall colors, 8 floors, a vending machine, arcade cabinet, couch, potted fern, cactus, lava lamp, fish tank and 4 posters, in plain words or step by step with buttons in the Office Space panel. You see what will change and press Apply before anything is saved; the decor is kept between sessions. `remove <piece>`, `list` and `reset` need no AI call. Pieces only go where nobody walks, and the default office draws exactly as before. Closes [#6](https://github.com/rbrtcnkln1/office-space/issues/6).
+- Workers now visit a vending machine on their breaks (when you add one) and carry back a soda, donut or cookie.
+- New `/office-space-team`: rename roles ("call the Coder Mx. Bytes"), restyle them from the art catalog (hair, hair color, outfit, accessory) and set the starting desk count (5 to 15, in rows of five). Say it in words or pick step by step in the panel; you press Apply before anything is saved. `reset` restores everything, `reset coder` one role. Names are cleaned and drawn as plain text, and `/office-space-recap` and the Employee of the Day use your titles too. Closes [#4](https://github.com/rbrtcnkln1/office-space/issues/4).
+- New `/office-space-theme`: `save <name>` writes your Boss, team and office decor to a small JSON file you can share, `load <name or path>` reads one back (strictly checked against the catalog, data only, with an Apply step), `list`, and `reset`. Three built-in presets, each with its own Boss, team and decorated room: 90s startup, cozy library, night shift. Closes [#7](https://github.com/rbrtcnkln1/office-space/issues/7).
+- Words for the office and the team (or choosing Other) make one small side request to a model, like the Boss, which uses a little plan usage; the reply is checked against the catalog before it is shown. Buttons, `list`, `remove`, `reset` and themes use none. Nothing is added to your conversation.
+- One step-by-step choice screen is shared by `/office-space-boss`, `/office-space-office`, `/office-space-team` and the theme's Apply step; only one is open at a time, and starting another replaces it.
+- Fix: the task line under each desk now wraps to at most two lines (24 characters each, ending in an ellipsis when cut) so neighbouring desks' text no longer runs together.
+- Fix: `/office-space-recap` missed background agents that started and finished between two 5-second looks, so busy days showed 0 hand-ins. Agents first seen already completed or failed now count (the first look after loading is only a baseline, so earlier work is not recounted). The recap also listens for the host's subagent-stop event, so an agent is counted even if the list drops it before the next look; each agent is counted once per finish.
+
 ## 0.11.0 — 2026-10-11
 Make the Boss yours.
 - New `/office-space-boss`: change the Boss's hair style, hair color, outfit and accessory. Type what you want in plain words, or pick step by step with buttons in the Office Space panel. You see what will change and press Apply before anything is saved. `reset` brings the default back, and your look is kept between sessions.

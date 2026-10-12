@@ -12,6 +12,11 @@
 //   /office-space-recap    today's hand-ins, failures and calls for a person
 //   /office-space-usage    context fill, plan limits and cost
 //   /office-space-workers  the outside-workers folder, what was read, what was skipped
+//   /office-space-boss     change how the Boss looks
+//   /office-space-office   decorate the office (walls, floor, furniture)
+//   /office-space-team     rename roles, restyle them, set the starting desks
+//   /office-space-theme    save, load and reset a whole look (Boss, team, office)
+// The customization commands share one stepped panel flow (./flow.ts).
 // Each command is one row of COMMANDS below.
 //
 // Work running outside the session appears too: any script can drop one JSON
@@ -22,10 +27,19 @@
 import { atom, read, update } from 'claude-code'
 import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 
-import { ACTIVE, FLOOR, Office, SCALE } from './office'
+import { ACTIVE, Office, SCALE } from './office'
 import { ROLES } from './sprites'
-import { BOSS_HELP, IN_PANEL, STEP_QUESTIONS, actBoss, startBoss, stepOptions, summaryLines } from './boss'
-import type { Action, BossIo, Flow, Outcome as BossOutcome } from './boss'
+import { BOSS_HELP, IN_PANEL, actBoss, bossView, startBoss } from './boss'
+import type { BossIo, Flow, Outcome as BossOutcome } from './boss'
+import type { Action } from './flow'
+import { OFFICE_HELP, IN_PANEL as OFFICE_IN_PANEL, actOffice, officeView, startOffice } from './decorate'
+import type { OFlow, OfficeIo, Outcome as OfficeOutcome } from './decorate'
+import { isDefaultOffice, sanitizeOffice } from './decor'
+import type { OfficeLook } from './decor'
+import { TEAM_HELP, TEAM_IN_PANEL, actTeam, isEmptyTeam, sanitizeTeam, startTeam, teamView } from './team'
+import type { Team, TeamFlow, TeamOutcome } from './team'
+import { MAX_THEME_BYTES, THEME_HELP, PRESETS, currentTheme, findPreset, parseTheme, resetTheme, slug, themeChangesNothing, themeLines, themeToJson, themeView, validName } from './theme'
+import type { Current, Theme, ThemeFlow } from './theme'
 import { DEFAULT_LOOK, sanitizeLook } from './catalog'
 import type { BossLook } from './catalog'
 import type { AgentLike } from './office'
@@ -43,6 +57,9 @@ const selected = atom({ plugin: 'office-space', key: 'selected' } as const, '') 
 const PANE = 'office-space'
 const STORE_BAND = 'band'
 const STORE_BOSS = 'bossLook'
+const STORE_OFFICE = 'officeLook'
+const STORE_TEAM = 'team'
+const THEMES_DIR = '.claude/office-space/themes' // under $HOME
 const BOSS_MODEL = 'haiku' // the smallest, fastest model: one short side call
 const STORE_UPDATE_CHECKED = 'updateChecked'
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -65,8 +82,13 @@ const MAX_BAND_PX = 460 // tallest the band version may draw on desktop (about h
 const PANE_SCALE = 4 // drawn large; the panel shrinks it to fit its width
 
 let office = new Office()
-let bossFlow: Flow | null = null // the Boss look being chosen; drawn as buttons in the panel
+type FlowId = 'boss' | 'office' | 'team'
+type ActiveFlow = { id: 'boss'; flow: Flow } | { id: 'office'; flow: OFlow } | { id: 'team'; flow: TeamFlow } | { id: 'theme'; flow: ThemeFlow }
+// The one customization being chosen (only one at a time); drawn as buttons in the panel.
+let activeFlow: ActiveFlow | null = null
 let bossLook: BossLook | undefined // saved Boss customization; undefined draws the default
+let officeLook: OfficeLook | undefined // saved office decoration; undefined draws the plain office
+let team: Team | undefined // saved team titles, looks and starting desks; undefined draws the defaults
 let timer: { cancel: () => void } | null = null
 let lastStep = 0 // ms of the last simulation step (from any driver)
 let paneOpen = false
@@ -242,14 +264,18 @@ async function refreshUsage($: EngineInterface): Promise<void> {
  * office is open. One small local read every few seconds; writes only when the
  * tally changes. Never throws.
  */
+async function dayEnsure($: EngineInterface): Promise<void> {
+  const key = dayKey()
+  if (tracker.key !== key) {
+    let saved: unknown
+    try { saved = await $.store.get(key) } catch {}
+    tracker.rollover(key, saved)
+  }
+}
 async function dayTick($: EngineInterface): Promise<void> {
   try {
-    const key = dayKey()
-    if (tracker.key !== key) {
-      let saved: unknown
-      try { saved = await $.store.get(key) } catch {}
-      tracker.rollover(key, saved)
-    }
+    await dayEnsure($)
+    const key = tracker.key
     let list: AgentInfo[] = []
     try { list = await $.agent.list() } catch {}
     const remote = toAgents(await visibleHere($, await readExternal($)), Date.now(), staleMinutes)
@@ -336,7 +362,7 @@ async function setOpen($: EngineInterface, on: boolean) {
     office = new Office()
     applyUsage()
     void refreshUsage($)
-    office.bossLook = bossLook
+    applyLooks()
     externalAt = 0
     resolvedDir = null
     await loadEotd($)
@@ -351,7 +377,7 @@ async function setOpen($: EngineInterface, on: boolean) {
 type Reply = { text: string }
 // A row decides what to do; the dispatcher below does it. Rows stay pure because
 // a module may not hand `$` to a function it looks up at run time.
-type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' | 'roster' | 'recap' | 'usage' | 'workers' } | { boss: string }
+type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' | 'roster' | 'recap' | 'usage' | 'workers' } | { boss: string } | { office: string } | { team: string } | { theme: string }
 type Command = {
   name: string
   description: string
@@ -481,6 +507,24 @@ export const COMMANDS: Command[] = [
     argumentHint: '[pink spiky hair, headphones | reset]',
     run: (args) => ({ boss: args }),
   },
+  {
+    name: 'office-space-office',
+    description: 'Decorate the office: walls, floor, vending machine, arcade and more, in plain words or step by step (uses a little plan usage)',
+    argumentHint: '[teal walls, a vending machine | remove couch | list | reset]',
+    run: (args) => ({ office: args }),
+  },
+  {
+    name: 'office-space-team',
+    description: 'Rename roles, restyle them and set the starting desk count, in words or step by step (uses a little plan usage)',
+    argumentHint: '[call the Coder "Mx. Bytes" | reset <role>]',
+    run: (args) => ({ team: args }),
+  },
+  {
+    name: 'office-space-theme',
+    description: 'Save, load, list or reset a whole look (Boss, team, office); includes three presets (no plan usage)',
+    argumentHint: '[save <name> | load <name or path> | list | reset]',
+    run: (args) => ({ theme: args }),
+  },
 ]
 
 const AGENT_LOOKS = 12 // transcripts read per roster (local reads, never the model)
@@ -554,7 +598,7 @@ ${total - rows.length} more not shown.` : text
 }
 
 function recapCommand(): string {
-  return recapText(tracker.log)
+  return recapText(tracker.log, (r) => office.titleOf(r))
 }
 
 async function usageCommand($: EngineInterface): Promise<string> {
@@ -617,106 +661,275 @@ async function workersCommand($: EngineInterface): Promise<string> {
   return workersReport({ dir, dirSource, dirState, files, notRead, now: Date.now(), staleMinutes, hiddenHere: hidden })
 }
 
+/** The one side call the customization commands make: the smallest model, no history, no tools. */
+async function sideCall($: EngineInterface, system: string, prompt: string, maxTokens = 300): Promise<string | null> {
+  const r = await $.model.complete({ model: BOSS_MODEL, system, prompt, maxTokens, effort: 'low', timeoutMs: MODEL_TIMEOUT_MS })
+  return r.isAnswered ? r.text : null
+}
+
 /** Wire the Boss flow to this plugin's `$`: a small side model call and the saved look. */
 function bossIo($: EngineInterface): BossIo {
   return {
-    complete: async (system, prompt) => {
-      const r = await $.model.complete({ model: BOSS_MODEL, system, prompt, maxTokens: 300, effort: 'low', timeoutMs: 20000 })
-      return r.isAnswered ? r.text : null
-    },
+    complete: (system, prompt) => sideCall($, system, prompt),
     load: async () => sanitizeLook(await $.store.get(STORE_BOSS)),
     save: async (look) => { await $.store.set(STORE_BOSS, look) },
   }
 }
 
+/** The same for the office decor. */
+function officeIo($: EngineInterface): OfficeIo {
+  return {
+    complete: (system, prompt) => sideCall($, system, prompt),
+    load: async () => sanitizeOffice(await $.store.get(STORE_OFFICE)),
+    save: async (look) => { await $.store.set(STORE_OFFICE, look) },
+  }
+}
+
+/** The same for the team. */
+function teamIo($: EngineInterface) {
+  return {
+    complete: (system: string, prompt: string) => sideCall($, system, prompt, 400),
+    load: async () => sanitizeTeam(await $.store.get(STORE_TEAM)),
+    save: async (t: Team | null) => { await $.store.set(STORE_TEAM, t) },
+  }
+}
+
+/** Put the saved customizations on the drawing. */
+function applyLooks() {
+  office.bossLook = bossLook
+  office.decor = officeLook
+  office.setTeam(team)
+}
+
+const isDefaultBoss = (d: BossLook): boolean => d.hair === DEFAULT_LOOK.hair && d.hairColor === DEFAULT_LOOK.hairColor && d.outfit === DEFAULT_LOOK.outfit && d.accessory === DEFAULT_LOOK.accessory
+const setBoss = (d: BossLook | undefined) => { bossLook = d && !isDefaultBoss(d) ? d : undefined }
+const setOffice = (l: OfficeLook | undefined) => { officeLook = l && !isDefaultOffice(l) ? l : undefined }
+const setTeamLook = (t: Team | undefined) => { team = t && !isEmptyTeam(t) ? t : undefined }
+
 /**
- * A finished Boss answer (a new look, or just words) or a flow to keep drawing.
+ * A finished answer (a new look, or just words) or a flow to keep drawing.
  * The choices live in the Office Space panel as buttons, so the command never
  * becomes a conversation turn: it only answers with one short line.
  */
-function takeBoss($: EngineInterface, r: BossOutcome): string | null {
+function takeOutcome($: EngineInterface, id: FlowId, r: BossOutcome | OfficeOutcome | TeamOutcome): string | null {
   if (r.flow) {
-    bossFlow = r.flow
+    activeFlow = { id, flow: r.flow } as ActiveFlow
     $.ui.invalidate('ui.render')
     return null
   }
-  bossFlow = null
-  if (r.look) {
-    const d = r.look
-    bossLook = d.hair === DEFAULT_LOOK.hair && d.hairColor === DEFAULT_LOOK.hairColor && d.outfit === DEFAULT_LOOK.outfit && d.accessory === DEFAULT_LOOK.accessory ? undefined : d
-    office.bossLook = bossLook
-  }
+  activeFlow = null
+  if (id === 'boss' && 'look' in r && r.look) setBoss(r.look as BossLook)
+  if (id === 'office' && 'look' in r && r.look) setOffice(r.look as OfficeLook)
+  if (id === 'team' && 'team' in r && r.team) setTeamLook(r.team)
+  applyLooks()
   $.ui.invalidate('ui.render')
   return r.text
 }
 
-async function runBoss($: EngineInterface, args: string): Promise<Reply> {
-  try {
-    const r = await startBoss(args, bossIo($))
-    const text = takeBoss($, r)
-    if (text !== null) return { text }
-    // Choices to make: they are drawn in the panel, so make sure it is showing.
-    if (!(await paneShowing($))) {
-      await setOpen($, true)
-      await openPane($)
-    }
-    return { text: IN_PANEL }
-  } catch {
-    return { text: BOSS_HELP }
+async function showPanel($: EngineInterface) {
+  if (!(await paneShowing($))) {
+    await setOpen($, true)
+    await openPane($)
   }
 }
 
-/** A button or typed answer in the panel's Boss steps. */
-function pressBoss($: EngineInterface, a: Action) {
-  const f = bossFlow
-  if (!f || f.busy) return
+const HELP: Record<FlowId, string> = { boss: BOSS_HELP, office: OFFICE_HELP, team: TEAM_HELP }
+const IN_PANEL_TEXT: Record<FlowId, string> = { boss: IN_PANEL, office: OFFICE_IN_PANEL, team: TEAM_IN_PANEL }
+
+/** Start a customization command; choices to make are drawn in the panel, so make sure it is showing. */
+async function runCustomize($: EngineInterface, id: FlowId, args: string): Promise<Reply> {
+  try {
+    const r = id === 'boss' ? await startBoss(args, bossIo($)) : id === 'office' ? await startOffice(args, officeIo($)) : await startTeam(args, teamIo($))
+    const text = takeOutcome($, id, r)
+    if (text !== null) return { text }
+    await showPanel($)
+    return { text: IN_PANEL_TEXT[id] }
+  } catch {
+    return { text: HELP[id] }
+  }
+}
+
+/** A button or typed answer in the panel's steps, routed to whichever command is open. */
+function pressFlow($: EngineInterface, a: Action) {
+  const cur = activeFlow
+  if (!cur || cur.flow.busy) return
+  if (cur.id === 'theme') return pressTheme($, cur.flow, a)
   void (async () => {
     try {
       if (a.kind === 'other') {
-        bossFlow = { ...f, busy: true }
+        activeFlow = { ...cur, flow: { ...cur.flow, busy: true } } as ActiveFlow
         $.ui.invalidate('ui.render')
       }
-      const text = takeBoss($, await actBoss(f, a, bossIo($)))
+      const r = cur.id === 'boss' ? await actBoss(cur.flow, a, bossIo($)) : cur.id === 'office' ? await actOffice(cur.flow, a, officeIo($)) : await actTeam(cur.flow, a, teamIo($))
+      const text = takeOutcome($, cur.id, r)
       if (text !== null) $.ui.toast(text.split('\n')[0] as string)
     } catch {
-      bossFlow = null
+      activeFlow = null
       $.ui.invalidate('ui.render')
     }
   })()
 }
 
-/** The Boss steps as buttons (and a text field for "Other" where the surface has one). */
-function bossView($: EngineInterface, e: RenderInput) {
-  const f = bossFlow
-  if (!f) return null
+// ----- themes -----
+
+/** Reads the saved Boss look, team and office back from the store (what a theme starts from, and what session.start draws). */
+async function loadSaved($: EngineInterface) {
+  try {
+    const saved = await $.store.get(STORE_BOSS)
+    setBoss(saved === undefined || saved === null ? undefined : sanitizeLook(saved))
+  } catch {}
+  try {
+    const saved = await $.store.get(STORE_OFFICE)
+    setOffice(saved === undefined || saved === null ? undefined : sanitizeOffice(saved))
+  } catch {}
+  try { setTeamLook(sanitizeTeam(await $.store.get(STORE_TEAM))) } catch {}
+  applyLooks()
+}
+
+const current = (): Current => ({ boss: bossLook ?? { ...DEFAULT_LOOK }, team: team ?? { titles: {}, looks: {} }, office: officeLook ?? sanitizeOffice(undefined) })
+
+async function themesDir($: EngineInterface): Promise<string | null> {
+  try {
+    const home = await $.env.get('HOME')
+    return home ? `${home.replace(/\/+$/, '')}/${THEMES_DIR}` : null
+  } catch { return null }
+}
+
+async function listThemes($: EngineInterface): Promise<string> {
+  const lines = ['Built-in presets:', ...PRESETS.map((p) => `  ${p.name}`)]
+  const dir = await themesDir($)
+  let saved: string[] = []
+  try { if (dir) saved = (await $.fs.list(dir)).filter((f) => f.kind === 'file' && !f.isLink && f.name.endsWith('.json')).map((f) => f.name.slice(0, -5)).slice(0, 50) } catch {}
+  lines.push('', saved.length ? `Your saved themes (${dir}):` : `No saved themes yet${dir ? ` (they go in ${dir})` : ''}.`, ...saved.map((n) => `  ${n}`))
+  return lines.join('\n')
+}
+
+/** Show what a theme will change and wait for Apply (R16). */
+async function offerTheme($: EngineInterface, theme: Theme): Promise<Reply> {
+  const lines = themeLines(current(), theme)
+  if (themeChangesNothing(current(), theme) || !lines.length) return { text: `"${theme.name}" is how the office already looks, so nothing changed.` }
+  activeFlow = { id: 'theme', flow: { theme, lines, busy: false } }
+  $.ui.invalidate('ui.render')
+  await showPanel($)
+  return { text: `Review the "${theme.name}" theme in the Office Space panel. Nothing changes until you press Apply.` }
+}
+
+async function runTheme($: EngineInterface, raw: string): Promise<Reply> {
+  try {
+    await loadSaved($)
+    const args = raw.replace(/\s+/g, ' ').trim()
+    const [verb = '', ...restWords] = args.split(' ')
+    const rest = restWords.join(' ').trim()
+    const v = verb.toLowerCase()
+    if (!args || v === 'help' || v === '?') return { text: `${THEME_HELP}\n\n${await listThemes($)}` }
+    if (v === 'list') return { text: await listThemes($) }
+    if (v === 'reset' || v === 'default') return offerTheme($, resetTheme())
+    if (v === 'save') {
+      if (!validName(rest)) return { text: 'Give the theme a short plain name, for example: /office-space-theme save night-owls' }
+      const dir = await themesDir($)
+      if (!dir) return { text: 'I could not find your home folder, so nothing was saved.' }
+      const file = slug(rest) || 'theme'
+      const path = `${dir}/${file}.json`
+      let existed = false
+      try { existed = await $.fs.exists(path) } catch {}
+      await $.fs.write(path, themeToJson(currentTheme(rest, current())))
+      return { text: `Saved ${existed ? '(replacing the earlier file) ' : ''}to ${path}. Share it, or load it later with /office-space-theme load ${file}.` }
+    }
+    const name = v === 'load' ? rest : args
+    if (!name) return { text: 'Which theme? Try /office-space-theme list.' }
+    const preset = findPreset(name)
+    if (preset) return offerTheme($, preset)
+    const isPath = name.includes('/') || name.startsWith('~') || name.toLowerCase().endsWith('.json')
+    let path: string
+    if (isPath) {
+      path = expandDir(name, await $.env.get('HOME'))
+    } else {
+      const dir = await themesDir($)
+      if (!dir) return { text: 'I could not find your home folder, so nothing was loaded.' }
+      path = `${dir}/${slug(name) || 'theme'}.json`
+    }
+    let text: unknown
+    try {
+      const st = await $.fs.stat(path)
+      if (st.kind !== 'file') return { text: `That is not a theme file (${path}). Nothing changed.` }
+      if (st.size > MAX_THEME_BYTES) return { text: `Could not load it: the file is too big (over ${MAX_THEME_BYTES} bytes). Nothing changed.` }
+      text = await $.fs.read(path)
+    } catch {
+      return { text: `I could not find or read a theme at ${path}. Try /office-space-theme list. Nothing changed.` }
+    }
+    const parsed = parseTheme(text)
+    if ('error' in parsed) return { text: `Could not load that theme: ${parsed.error}. Nothing changed.` }
+    return offerTheme($, parsed.theme)
+  } catch {
+    return { text: THEME_HELP }
+  }
+}
+
+/** Apply or Cancel on a loaded theme: Boss, team and office decor are saved and drawn together. */
+function pressTheme($: EngineInterface, f: ThemeFlow, a: Action) {
+  if (a.kind === 'cancel') {
+    activeFlow = null
+    $.ui.invalidate('ui.render')
+    $.ui.toast('Okay, nothing changed.')
+    return
+  }
+  if (a.kind !== 'apply') return
+  activeFlow = { id: 'theme', flow: { ...f, busy: true } }
+  void (async () => {
+    try {
+      const t = f.theme
+      if (t.boss) {
+        setBoss(t.boss)
+        try { await $.store.set(STORE_BOSS, bossLook ?? null) } catch {}
+      }
+      if (t.team) {
+        setTeamLook(t.team)
+        try { await $.store.set(STORE_TEAM, team ?? null) } catch {}
+      }
+      if (t.office) {
+        setOffice(t.office)
+        try { await $.store.set(STORE_OFFICE, officeLook ?? null) } catch {}
+      }
+      applyLooks()
+      $.ui.toast(`Theme "${t.name}" applied.`)
+    } catch {}
+    activeFlow = null
+    $.ui.invalidate('ui.render')
+  })()
+}
+
+/** The steps as buttons (and a text field for "Other" where the surface has one), the same for every command. */
+function flowView($: EngineInterface, e: RenderInput) {
+  const cur = activeFlow
+  const v = !cur ? null : cur.id === 'boss' ? bossView(cur.flow) : cur.id === 'office' ? officeView(cur.flow) : cur.id === 'team' ? teamView(cur.flow) : themeView(cur.flow)
+  if (!v) return null
   const t = $.ui.resolve(e)
   const { Box, Text, Button } = t
   const Input = 'Input' in t ? t.Input : null
-  const note = f.notes.length ? <Text dimColor>{f.notes.join(' ')}</Text> : null
-  if (f.busy) return <Box flexDirection="column"><Text bold>Boss look</Text><Text dimColor>Asking the AI...</Text></Box>
-  if (f.stage === 'confirm') {
+  const note = v.notes.length ? <Text dimColor>{v.notes.join(' ')}</Text> : null
+  const cancel = <Button key={`${v.id}-cancel`} label="Cancel" onPress={() => pressFlow($, { kind: 'cancel' })} />
+  if (v.busy) return <Box flexDirection="column"><Text bold>{v.title}</Text><Text dimColor>Asking the AI...</Text></Box>
+  if (v.stage === 'confirm') {
     return (
       <Box flexDirection="column">
-        <Text bold>Boss look: apply this change?</Text>
-        {summaryLines(f).map((l, i) => <Text key={`bl${i}`}>{l}</Text>)}
+        <Text bold>{v.heading}</Text>
+        {v.summary.map((l, i) => <Text key={`${v.id}-l${i}`}>{l}</Text>)}
         {note}
-        <Button key="boss-apply" label="Apply" onPress={() => pressBoss($, { kind: 'apply' })} />
-        <Button key="boss-restart" label="Start over" onPress={() => pressBoss($, { kind: 'restart' })} />
-        <Button key="boss-cancel" label="Cancel" onPress={() => pressBoss($, { kind: 'cancel' })} />
+        <Button key={`${v.id}-apply`} label="Apply" onPress={() => pressFlow($, { kind: 'apply' })} />
+        {v.restart === false ? null : <Button key={`${v.id}-restart`} label="Start over" onPress={() => pressFlow($, { kind: 'restart' })} />}
+        {cancel}
       </Box>
     )
   }
-  const slot = f.slots[f.i]
-  if (!slot) return null
   return (
     <Box flexDirection="column">
-      <Text bold>{`Boss look (${f.i + 1} of ${f.slots.length}): ${STEP_QUESTIONS[slot]}`}</Text>
-      {stepOptions(slot, f.draft).map((o) => (
-        <Button key={`boss-${slot}-${o.id}`} label={o.label} onPress={() => pressBoss($, { kind: 'choose', id: o.id })} />
+      <Text bold>{v.heading}</Text>
+      {v.options.map((o) => (
+        <Button key={`${v.id}-${v.stepKey}-${o.id}`} label={o.label} onPress={() => pressFlow($, { kind: 'choose', id: o.id })} />
       ))}
-      {Input ? <Input key={`boss-other-${slot}`} label="Other: " placeholder="describe it in words, then Enter" onSubmit={(v: string) => pressBoss($, { kind: 'other', text: v })} /> : null}
+      {Input && v.other ? <Input key={`${v.id}-other-${v.stepKey}`} label="Other: " placeholder={v.otherHint ?? 'describe it in words, then Enter'} onSubmit={(x: string) => pressFlow($, { kind: 'other', text: x })} /> : null}
       {note}
-      <Button key="boss-cancel" label="Cancel" onPress={() => pressBoss($, { kind: 'cancel' })} />
+      {cancel}
     </Box>
   )
 }
@@ -734,7 +947,10 @@ async function feedback($: EngineInterface): Promise<string> {
 async function runCommand($: EngineInterface, name: string, args: string): Promise<Reply> {
   const c = COMMANDS.find((x) => x.name === name)
   const out = c ? c.run(args) : { text: 'Unknown command. Type /office-space-help.' }
-  if ('boss' in out) return runBoss($, out.boss)
+  if ('boss' in out) return runCustomize($, 'boss', out.boss)
+  if ('office' in out) return runCustomize($, 'office', out.office)
+  if ('team' in out) return runCustomize($, 'team', out.team)
+  if ('theme' in out) return runTheme($, out.theme)
   if ('action' in out) {
     try {
       const a = out.action
@@ -758,7 +974,7 @@ export function helpText(): string {
     ...lines,
     '',
     'Settings (/plugin -> office-space -> configure): workersDir, staleMinutes, alertOnBlocked, checkForUpdates, showUsage.',
-    'Only /office-space-roster makes an AI call (one small-model request per run, outside your chat); everything else is local. None of it adds anything to your conversation.',
+    'Only /office-space-roster, and /office-space-boss, /office-space-team and /office-space-office (with words, or Other), make an AI call (one small-model request per ask, outside your chat); everything else is local. None of it adds anything to your conversation.',
     'Docs: https://github.com/rbrtcnkln1/office-space#readme',
   ].join('\n')
 }
@@ -822,6 +1038,20 @@ export const register: Register = (on, options) => {
   const su = (options as { showUsage?: unknown } | undefined)?.showUsage
   showUsage = !(su === false || su === 'false')
 
+  // A subagent ended: tell the recap now, in case the list drops it before the next look.
+  on('classic.SubagentStop', async ($, e, next) => {
+    try {
+      const id = (e as { agent_id?: unknown }).agent_id
+      if (typeof id === 'string' && id) {
+        await dayEnsure($)
+        let latest: AgentLike | undefined
+        try { latest = ((await $.agent.list()) as AgentLike[]).find(a => a.id === id) } catch {}
+        if (tracker.finish(id, String((e as { agent_type?: unknown }).agent_type ?? ''), latest)) await $.store.set(tracker.key, tracker.log)
+      }
+    } catch {}
+    return next(e)
+  })
+
   on('session.start', async ($, e, next) => {
     for (const c of COMMANDS) {
       await $.command.register({
@@ -834,11 +1064,7 @@ export const register: Register = (on, options) => {
     try {
       bandOn = (await $.store.get(STORE_BAND)) === true
     } catch {}
-    try {
-      const saved = await $.store.get(STORE_BOSS)
-      bossLook = saved === undefined || saved === null ? undefined : sanitizeLook(saved)
-      office.bossLook = bossLook
-    } catch {}
+    await loadSaved($)
     // The panel is never assumed open from an earlier chat; only one the app
     // already shows in this session (restored or kept across a reload) counts.
     paneOpen = await paneShowing($)
@@ -903,9 +1129,9 @@ export const register: Register = (on, options) => {
       const rows = e.props.scroll?.bodyRows || 0
       const sel = await read($, selected)
       return (
-        <Box flexDirection="column" backgroundColor={FLOOR} width="100%" height={rows > 0 ? rows : '100%'} flexGrow={1}>
+        <Box flexDirection="column" backgroundColor={office.floorColor()} width="100%" height={rows > 0 ? rows : '100%'} flexGrow={1}>
           <Svg source={office.render(PANE_SCALE)} alt={`Office: ${office.summary()}`} />
-          {bossView($, e)}
+          {flowView($, e)}
           {needsView($, e, sel, true)}
         </Box>
       )
@@ -922,7 +1148,7 @@ export const register: Register = (on, options) => {
             <Text dimColor>{l.label}</Text>
           </Text>
         ))}
-        {bossView($, e)}
+        {flowView($, e)}
         {needsView($, e, sel, true)}
       </Box>
     )

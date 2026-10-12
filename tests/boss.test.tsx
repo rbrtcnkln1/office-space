@@ -58,10 +58,10 @@ describe('catalog', () => {
     expect(paletteFor('boss', DEFAULT_LOOK)).toEqual(paletteFor('boss'))
   })
 
-  test('a look changes the drawing and only the Boss wears it', () => {
+  test('a look changes the drawing (the team command restyles other roles the same way)', () => {
     const look: BossLook = { hair: 'frosted', hairColor: 'pink', outfit: 'early-2000s', accessory: 'headphones' }
     expect(character({ role: 'boss', dir: 'down', pose: 'stand', frame: 0, look })).not.toEqual(character({ role: 'boss', dir: 'down', pose: 'stand', frame: 0 }))
-    expect(character({ role: 'coder', dir: 'down', pose: 'stand', frame: 0, look })).toEqual(character({ role: 'coder', dir: 'down', pose: 'stand', frame: 0 }))
+    expect(character({ role: 'coder', dir: 'down', pose: 'stand', frame: 0, look })).not.toEqual(character({ role: 'coder', dir: 'down', pose: 'stand', frame: 0 }))
   })
 
   test('parseLookPatch accepts catalog ids only, and refuses the whole patch otherwise', () => {

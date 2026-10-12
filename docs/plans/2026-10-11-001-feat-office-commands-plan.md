@@ -118,3 +118,31 @@ Covers R8, R12, R13 (Boss), R14-R18, R20.
 - **Catalog:** `plugin/hooks/catalog.ts` (ids, labels, colors, validation, closest-options text) is pure and shared by the later team/office/theme commands; the art is drawn by `character()` in `sprites.ts`.
 - **Persistence:** `$.store` key `bossLook`, read on `session.start`, cleared by `/office-space-boss reset`.
 - **Confirmation:** every change, from words or steps, shows its summary with Apply, Start over and Cancel; only Apply saves.
+
+## Wave 2, slice: `/office-space-office` (resolved)
+
+Covers R10, R12, R13 (office), R14-R18, R20.
+
+- **Shared stepped flow.** `plugin/hooks/flow.ts` holds the neutral `Action` and `FlowView` types. Each command keeps its own pure state machine (`boss.ts`, `decorate.ts`) and turns its state into a `FlowView`; `register.tsx` draws every view with one `flowView` function (question, 2 to 4 buttons, an Other field, then summary with Apply, Start over, Cancel) and routes presses by command id. Button keys stay `<command>-<step>-<option>`, so the Boss tests are unchanged. Only one flow is open at a time.
+- **Catalog.** `decor.ts` (ids, labels, slots, geometry, validation, `OfficeLook` with `sanitizeOffice`/`parseOfficePatch`) and `decorart.ts` (pixel grids and floor patterns). Themes can serialize an `OfficeLook` as is.
+- **Slots never block paths.** 3 wall slots, the vending machine's own break-area spot, and 5 slots along a 30 px strip added under the last row of desks (only when something stands there). A test checks every slot against the aisle, corridors, desks, door, Boss desk, break spots and existing furniture at several room sizes.
+- **AI path.** The same haiku side call as the Boss; the reply must be one JSON object of catalog ids (`wall`, `floor`, `add`, `remove`, plus `unknown` and `vague`), validated as a whole. Persistence: `$.store` key `officeLook`.
+## Wave 2, slice 2: `/office-space-team` and `/office-space-theme` (resolved)
+
+Covers R9, R11, R13 (team, theme), R14-R20.
+
+- **Team data** (`plugin/hooks/team.ts`, pure): `{ titles, looks, desks }` keyed by role id. A look is a partial of the Boss's four catalog ids, so a part left out keeps the role's built-in look; `character()` and `paletteFor()` now accept a partial look for any role. Titles go through `sanitize()` and are capped at 14 characters; the renderer escapes them. Persisted in `$.store` key `team`, cleared by `reset`.
+- **Desks:** 5 to 15, rounded up to full rows of five by the existing layout rules (`Office.startDesks`); an occupied desk is never removed. Mapping words in agent tasks to roles was skipped: the role rules are regexes in `sprites.ts` and a per-user mapping needs its own design.
+- **Panel:** the Boss's panel code became a generic `choiceView` used by Boss, team and theme. Team steps: what -> role -> part -> choice(s) -> summary -> Apply; "Other" takes an exact role, title or number with no AI call, and anything else goes through the same validated haiku call as plain words.
+- **Themes** (`plugin/hooks/theme.ts`): `{ format, version, name, boss?, team?, office? }`, strict whitelist validation, 8 KB cap, saved under `~/.claude/office-space/themes/<slug>.json`, loaded by name or path, confirmed with the same Apply summary. Three presets use only catalog ids.
+- **Office section is a stand-in.** `validateOffice()` in `theme.ts` accepts only a flat object of short ids and small numbers and is stored under `officeLook`; swap it for the office command's validator and store key when `/office-space-office` lands.
+
+## Integration for 0.12.0 (resolved)
+
+The office slice and the team/theme slice each generalized the Boss panel separately (`flow.ts` with `FlowView`, and a `choiceView` in `register.tsx`). 0.12.0 keeps one mechanism:
+
+- **`flow.ts` is the shared contract.** Each command turns its own state into a `FlowView` in its own pure module (`bossView`, `officeView`, `teamView`, `themeView`), so every view is unit-testable without `$`. `register.tsx` keeps one `activeFlow` tagged `boss | office | team | theme`, one `flowView` that draws any view, and one `pressFlow` that routes a press by tag. `FlowView` gained `otherHint` (the team's placeholders) and `restart` (a loaded theme has no steps to start over). Button keys are unchanged (`<command>-<step>-<option>`, `<command>-apply|restart|cancel`). Starting any customization replaces the open one.
+- **Theme office section is the real decor.** `validateOffice()` in `theme.ts` now accepts only `OfficeLook` (`wall`, `floor`, `items` slot -> piece, every id from the catalog and every piece in a slot it fits), refusing anything else, and normalizes with `sanitizeOffice()`. Applying a theme writes `officeLook`, the same store key `/office-space-office` uses; save, load, presets and `reset` cover Boss, team and decor. Each preset now has a decorated room.
+- **Recap titles.** `recapText()` takes the office's `titleOf`, so the recap and Employee of the Day use custom team titles.
+- **Default render.** The two-line desk label adds 2 px to the room; the no-decor hash test was re-measured on label wrap + recap before decor merged, and decor, team and theme leave it byte-identical.
+

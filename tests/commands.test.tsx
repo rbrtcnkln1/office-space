@@ -5,7 +5,7 @@ const text = (r: unknown) => JSON.stringify(r)
 
 // The command table lives in hooks/register.tsx (COMMANDS). The test kit does not
 // list registered commands, so this is the one place a new command is also named.
-const NAMES = ['office-space', 'office-space-band', 'office-space-help', 'office-space-update', 'office-space-feedback', 'office-space-roster', 'office-space-recap', 'office-space-usage', 'office-space-workers']
+const NAMES = ['office-space', 'office-space-band', 'office-space-help', 'office-space-update', 'office-space-feedback', 'office-space-roster', 'office-space-recap', 'office-space-usage', 'office-space-workers', 'office-space-boss']
 
 test('every command is registered as its own entry and answers when run', async ($, on) => {
   mock.clock(on)
@@ -20,7 +20,7 @@ test('every command is registered as its own entry and answers when run', async 
 test('/office-space-help lists every command with a description, and the docs link', async ($, on) => {
   mock.clock(on)
   const help = text(await $.command.run({ command: 'office-space-help', args: '' } as never))
-  for (const name of NAMES) expect(help).toContain('/' + name + ' - ')
+  for (const name of NAMES) expect(help).toMatch(new RegExp('/' + name + '( \\[[^\\]]*\\])? - '))
   expect(help).toContain('github.com/rbrtcnkln1/office-space')
 })
 

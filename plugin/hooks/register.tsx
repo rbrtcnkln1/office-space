@@ -24,6 +24,10 @@ import type { AgentInfo, EngineInterface, Register } from 'claude-code'
 
 import { ACTIVE, FLOOR, Office, SCALE } from './office'
 import { ROLES } from './sprites'
+import { BOSS_HELP, IN_PANEL, STEP_QUESTIONS, actBoss, startBoss, stepOptions, summaryLines } from './boss'
+import type { Action, BossIo, Flow, Outcome as BossOutcome } from './boss'
+import { DEFAULT_LOOK, sanitizeLook } from './catalog'
+import type { BossLook } from './catalog'
 import type { AgentLike } from './office'
 import { DEFAULT_DIR, DEFAULT_STALE_MINUTES, MAX_FILE_BYTES, classifyWorker, expandDir, inScope, alertText, isWorkerFile, newlyNeeding, normalizePath, parseWorker, toAgents } from './external'
 import type { ExternalWorker } from './external'
@@ -38,6 +42,8 @@ const open = atom({ plugin: 'office-space', key: 'open' } as const, false)
 const selected = atom({ plugin: 'office-space', key: 'selected' } as const, '') // the worker whose note is showing
 const PANE = 'office-space'
 const STORE_BAND = 'band'
+const STORE_BOSS = 'bossLook'
+const BOSS_MODEL = 'haiku' // the smallest, fastest model: one short side call
 const STORE_UPDATE_CHECKED = 'updateChecked'
 const DAY_MS = 24 * 60 * 60 * 1000
 const FETCH_TIMEOUT_MS = 8000
@@ -59,6 +65,8 @@ const MAX_BAND_PX = 460 // tallest the band version may draw on desktop (about h
 const PANE_SCALE = 4 // drawn large; the panel shrinks it to fit its width
 
 let office = new Office()
+let bossFlow: Flow | null = null // the Boss look being chosen; drawn as buttons in the panel
+let bossLook: BossLook | undefined // saved Boss customization; undefined draws the default
 let timer: { cancel: () => void } | null = null
 let lastStep = 0 // ms of the last simulation step (from any driver)
 let paneOpen = false
@@ -328,6 +336,7 @@ async function setOpen($: EngineInterface, on: boolean) {
     office = new Office()
     applyUsage()
     void refreshUsage($)
+    office.bossLook = bossLook
     externalAt = 0
     resolvedDir = null
     await loadEotd($)
@@ -342,7 +351,7 @@ async function setOpen($: EngineInterface, on: boolean) {
 type Reply = { text: string }
 // A row decides what to do; the dispatcher below does it. Rows stay pure because
 // a module may not hand `$` to a function it looks up at run time.
-type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' | 'roster' | 'recap' | 'usage' | 'workers' }
+type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' | 'roster' | 'recap' | 'usage' | 'workers' } | { boss: string }
 type Command = {
   name: string
   description: string
@@ -465,6 +474,12 @@ export const COMMANDS: Command[] = [
     name: 'office-space-workers',
     description: 'Show the outside-workers folder, who was read from it, and any files skipped and why',
     run: () => ({ action: 'workers' }),
+  },
+  {
+    name: 'office-space-boss',
+    description: 'Change how the Boss looks, in plain words or step by step (uses a little plan usage)',
+    argumentHint: '[pink spiky hair, headphones | reset]',
+    run: (args) => ({ boss: args }),
   },
 ]
 
@@ -602,6 +617,110 @@ async function workersCommand($: EngineInterface): Promise<string> {
   return workersReport({ dir, dirSource, dirState, files, notRead, now: Date.now(), staleMinutes, hiddenHere: hidden })
 }
 
+/** Wire the Boss flow to this plugin's `$`: a small side model call and the saved look. */
+function bossIo($: EngineInterface): BossIo {
+  return {
+    complete: async (system, prompt) => {
+      const r = await $.model.complete({ model: BOSS_MODEL, system, prompt, maxTokens: 300, effort: 'low', timeoutMs: 20000 })
+      return r.isAnswered ? r.text : null
+    },
+    load: async () => sanitizeLook(await $.store.get(STORE_BOSS)),
+    save: async (look) => { await $.store.set(STORE_BOSS, look) },
+  }
+}
+
+/**
+ * A finished Boss answer (a new look, or just words) or a flow to keep drawing.
+ * The choices live in the Office Space panel as buttons, so the command never
+ * becomes a conversation turn: it only answers with one short line.
+ */
+function takeBoss($: EngineInterface, r: BossOutcome): string | null {
+  if (r.flow) {
+    bossFlow = r.flow
+    $.ui.invalidate('ui.render')
+    return null
+  }
+  bossFlow = null
+  if (r.look) {
+    const d = r.look
+    bossLook = d.hair === DEFAULT_LOOK.hair && d.hairColor === DEFAULT_LOOK.hairColor && d.outfit === DEFAULT_LOOK.outfit && d.accessory === DEFAULT_LOOK.accessory ? undefined : d
+    office.bossLook = bossLook
+  }
+  $.ui.invalidate('ui.render')
+  return r.text
+}
+
+async function runBoss($: EngineInterface, args: string): Promise<Reply> {
+  try {
+    const r = await startBoss(args, bossIo($))
+    const text = takeBoss($, r)
+    if (text !== null) return { text }
+    // Choices to make: they are drawn in the panel, so make sure it is showing.
+    if (!(await paneShowing($))) {
+      await setOpen($, true)
+      await openPane($)
+    }
+    return { text: IN_PANEL }
+  } catch {
+    return { text: BOSS_HELP }
+  }
+}
+
+/** A button or typed answer in the panel's Boss steps. */
+function pressBoss($: EngineInterface, a: Action) {
+  const f = bossFlow
+  if (!f || f.busy) return
+  void (async () => {
+    try {
+      if (a.kind === 'other') {
+        bossFlow = { ...f, busy: true }
+        $.ui.invalidate('ui.render')
+      }
+      const text = takeBoss($, await actBoss(f, a, bossIo($)))
+      if (text !== null) $.ui.toast(text.split('\n')[0] as string)
+    } catch {
+      bossFlow = null
+      $.ui.invalidate('ui.render')
+    }
+  })()
+}
+
+/** The Boss steps as buttons (and a text field for "Other" where the surface has one). */
+function bossView($: EngineInterface, e: RenderInput) {
+  const f = bossFlow
+  if (!f) return null
+  const t = $.ui.resolve(e)
+  const { Box, Text, Button } = t
+  const Input = 'Input' in t ? t.Input : null
+  const note = f.notes.length ? <Text dimColor>{f.notes.join(' ')}</Text> : null
+  if (f.busy) return <Box flexDirection="column"><Text bold>Boss look</Text><Text dimColor>Asking the AI...</Text></Box>
+  if (f.stage === 'confirm') {
+    return (
+      <Box flexDirection="column">
+        <Text bold>Boss look: apply this change?</Text>
+        {summaryLines(f).map((l, i) => <Text key={`bl${i}`}>{l}</Text>)}
+        {note}
+        <Button key="boss-apply" label="Apply" onPress={() => pressBoss($, { kind: 'apply' })} />
+        <Button key="boss-restart" label="Start over" onPress={() => pressBoss($, { kind: 'restart' })} />
+        <Button key="boss-cancel" label="Cancel" onPress={() => pressBoss($, { kind: 'cancel' })} />
+      </Box>
+    )
+  }
+  const slot = f.slots[f.i]
+  if (!slot) return null
+  return (
+    <Box flexDirection="column">
+      <Text bold>{`Boss look (${f.i + 1} of ${f.slots.length}): ${STEP_QUESTIONS[slot]}`}</Text>
+      {stepOptions(slot, f.draft).map((o) => (
+        <Button key={`boss-${slot}-${o.id}`} label={o.label} onPress={() => pressBoss($, { kind: 'choose', id: o.id })} />
+      ))}
+      {Input ? <Input key={`boss-other-${slot}`} label="Other: " placeholder="describe it in words, then Enter" onSubmit={(v: string) => pressBoss($, { kind: 'other', text: v })} /> : null}
+      {note}
+      <Button key="boss-cancel" label="Cancel" onPress={() => pressBoss($, { kind: 'cancel' })} />
+    </Box>
+  )
+}
+
 async function feedback($: EngineInterface): Promise<string> {
   let office: string | null = null
   let claude: string | null = null
@@ -615,6 +734,7 @@ async function feedback($: EngineInterface): Promise<string> {
 async function runCommand($: EngineInterface, name: string, args: string): Promise<Reply> {
   const c = COMMANDS.find((x) => x.name === name)
   const out = c ? c.run(args) : { text: 'Unknown command. Type /office-space-help.' }
+  if ('boss' in out) return runBoss($, out.boss)
   if ('action' in out) {
     try {
       const a = out.action
@@ -714,6 +834,11 @@ export const register: Register = (on, options) => {
     try {
       bandOn = (await $.store.get(STORE_BAND)) === true
     } catch {}
+    try {
+      const saved = await $.store.get(STORE_BOSS)
+      bossLook = saved === undefined || saved === null ? undefined : sanitizeLook(saved)
+      office.bossLook = bossLook
+    } catch {}
     // The panel is never assumed open from an earlier chat; only one the app
     // already shows in this session (restored or kept across a reload) counts.
     paneOpen = await paneShowing($)
@@ -780,6 +905,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column" backgroundColor={FLOOR} width="100%" height={rows > 0 ? rows : '100%'} flexGrow={1}>
           <Svg source={office.render(PANE_SCALE)} alt={`Office: ${office.summary()}`} />
+          {bossView($, e)}
           {needsView($, e, sel, true)}
         </Box>
       )
@@ -796,6 +922,7 @@ export const register: Register = (on, options) => {
             <Text dimColor>{l.label}</Text>
           </Text>
         ))}
+        {bossView($, e)}
         {needsView($, e, sel, true)}
       </Box>
     )

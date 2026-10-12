@@ -2,6 +2,10 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## Unreleased
+- New `/office-space-boss`: change the Boss's hair style, hair color, outfit and accessory from plain words or a step-by-step choice in the Office Space panel, with a confirmation before anything is saved, `reset`, and persistence between sessions. Words use one small side model call (a little plan usage); nothing is added to the conversation.
+- A reusable art catalog (`hooks/catalog.ts`): 8 hair styles, 14 hair colors, 6 outfits (including an early-2000s track jacket) and 6 accessories; everything a model returns is validated against it.
+
 ## 0.10.0 — 2026-10-11
 Four commands that tell you what is happening in the office, and a usage board.
 - New `/office-space-roster`: everyone at work (subagents and outside workers), their state, how long they have been at it, and a one-line summary of what each is doing. The summaries come from one batched small-model call per run, outside your chat, and the reply is validated before it is shown. When the call fails or there is no activity to read, each line falls back to the worker's own task text and says so. This is the only command that uses plan usage.

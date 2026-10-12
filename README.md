@@ -34,6 +34,7 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 | `/office-space-band` | Show or hide the small office strip above the prompt |
 | `/office-space-help` | List every Office Space command and setting |
 | `/office-space-update` | Check GitHub for a newer version and update to it (see [Updating](#updating)) |
+| `/office-space-boss` | Change how the Boss looks in plain words or step by step, or `reset` (see [Make the Boss yours](#make-the-boss-yours)) |
 | `/office-space-feedback` | Shows the link to report a bug or share an idea, plus your version details to paste in |
 | `/office-space-roster` | Who is at work right now (subagents and outside workers), how long they have been at it, and a one-line summary of what each is doing. Uses a little plan usage (see below) |
 | `/office-space-recap` | Today's hand-ins, failures, outside workers that needed a person, and the Employee of the Day |
@@ -42,7 +43,7 @@ A Claude Code mod that draws your session as a tiny 16-bit office. The main chat
 
 Type `/office-space` in the prompt and the menu lists all of them. The older `/office-space band` still works.
 
-**Which commands use plan usage?** Only `/office-space-roster`. Each run makes one small-model request (Haiku, low effort, a few hundred tokens) that sends every worker's task and recent steps and gets one-line summaries back. It happens outside your conversation, so it adds nothing to your chat context, and the reply is checked before it is shown. If the call fails, times out, is offline, or the reply is unusable, the roster shows each worker's own task text instead and says so. The other commands read local data only. Nothing runs an AI call on its own.
+**Which commands use plan usage?** Only `/office-space-roster` and, when you describe a look in words, `/office-space-boss` (the step-by-step choice uses none). Each roster run makes one small-model request (Haiku, low effort, a few hundred tokens) that sends every worker's task and recent steps and gets one-line summaries back. It happens outside your conversation, so it adds nothing to your chat context, and the reply is checked before it is shown. If the call fails, times out, is offline, or the reply is unusable, the roster shows each worker's own task text instead and says so. The other commands read local data only. Nothing runs an AI call on its own.
 
 Sample roster:
 
@@ -85,6 +86,21 @@ The settings are optional and have defaults. Change them in `/plugin` → office
 
 More commands (customize the Boss, your team and the office) are planned — see the [roadmap issues](https://github.com/rbrtcnkln1/office-space/issues).
 
+## Make the Boss yours
+
+Give the Boss a new look, from a small catalog of pixel-art hair styles, hair colors, outfits and accessories:
+
+```
+/office-space-boss pink frosted hair, an early-2000s track jacket and headphones
+```
+
+- Run it with no words and the Office Space panel walks you through hair style, hair color, outfit and accessory, a few buttons each. Type your own into **Other** and it is read the same way as plain words.
+- Whatever you ask for, you see what will change and press **Apply** (or **Cancel**) before anything is saved. The look is kept between sessions. `/office-space-boss reset` brings the default back.
+- If you ask for something the catalog does not have yet, such as a jetpack, the reply says so and lists the closest options.
+- Reading your words (and "Other") makes one small call to a fast model, so it uses a little of your plan usage. Picking buttons does not. Nothing is added to your conversation.
+
+![The default Boss next to a customized one](docs/media/boss-before-after.png)
+
 ## Updating
 
 New versions reach you when the `version` in `plugin/.claude-plugin/plugin.json` is bumped on `main`; a change without a bump is not delivered to installed copies.
@@ -111,7 +127,7 @@ A Claude Code version that supports plugin hook modules (2.1.29x or newer); olde
 
 ## FAQ
 
-**Does it use my context or tokens?** Not your context: it only draws UI and answers commands as text, with no skills, agents or prompt text, so it adds nothing to Claude's context. The one exception to "no tokens" is `/office-space-roster`, which spends a little plan usage on one small side request each time you run it (see [Commands](#commands)).
+**Does it use my context or tokens?** Not your context: it only draws UI and answers commands as text, with no skills, agents or prompt text, so it adds nothing to Claude's context. The exceptions to "no tokens" are `/office-space-roster` and `/office-space-boss` with words, which spend a little plan usage on one small side request each time you run them (see [Commands](#commands)).
 
 **How do I update?** Type `/office-space-update`, or see [Updating](#updating) for the manual and automatic options.
 

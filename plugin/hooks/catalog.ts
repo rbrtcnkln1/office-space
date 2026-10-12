@@ -159,3 +159,54 @@ export function changeLines(from: BossLook, to: BossLook): string[] {
 export function catalogForPrompt(): string {
   return SLOTS.map((s) => `${s}: ${CATALOG[s].map((e) => e.id).join(' | ')}`).join('\n')
 }
+
+// ----- reading plain words (the AI side of the look commands) -----
+
+/** The allowed ids with their names, so the model can map everyday words ("silver", "jeans") onto them. */
+export function describedCatalog(slots: readonly Slot[] = SLOTS): string {
+  return slots.map((s) => `${s}: ${CATALOG[s].map((e) => (norm(e.id) === norm(e.label) ? e.id : `${e.id} (${e.label})`)).join(' | ')}`).join('\n')
+}
+
+/** How the model maps words onto the catalog; shared by the Boss and team prompts. */
+export const MATCHING_RULES =
+  'Map everyday words, synonyms and near matches onto the closest allowed id (silver, grey or salt-and-pepper hair is gray; platinum is white; golden is blonde; ginger is orange; jeans or a graphic tee is tee). ' +
+  'Details an allowed id cannot show (a print, a brand, the color of a garment) are not unknown: pick the id and leave them out. ' +
+  'If two or more ids fit about equally, do not guess: list that part as vague. ' +
+  'Things that are not part of the look at all (shoes, tattoos, jewelry, facial hair, makeup) are never unknown: list them as missing.'
+
+// Everyday asks for things a look has no part for. A safety net under the
+// model's own "missing" list, so the answer never offers unrelated closest options.
+const NOT_PARTS: readonly [RegExp, string][] = [
+  [/\b(shoes?|sneakers?|converse|boots?|heels|sandals|loafers|trainers|socks|slippers)\b/i, 'shoes'],
+  [/\btattoos?\b/i, 'tattoos'],
+  [/\b(piercings?|earrings?|jewel(le)?ry|necklaces?|bracelets?|rings?|watch(es)?)\b/i, 'jewelry'],
+  [/\b(beards?|must(a|ou)ches?|goatees?|stubble|sideburns)\b/i, 'facial hair'],
+  [/\b(make-?up|lipstick|eyeliner|mascara|nail polish)\b/i, 'makeup'],
+]
+
+/** The kind of thing an ask names when a look has no part for it ("shoes"), or undefined. */
+export function notALookPart(text: string): string | undefined {
+  return NOT_PARTS.find(([re]) => re.test(text))?.[1]
+}
+
+/** "Shoes aren't part of the Boss's look yet." */
+export function notAPartLine(kind: string, whose: string): string {
+  const k = kind.trim().toLowerCase()
+  return `${k.charAt(0).toUpperCase()}${k.slice(1)} ${/s$/.test(k) ? "aren't" : "isn't"} part of ${whose} look yet.`
+}
+
+// Hair-color words the model sometimes leaves unmapped; each names exactly one id.
+const HAIR_COLOR_WORDS: readonly [RegExp, string][] = [
+  [/\b(silver|grey|gray|salt[- ]and[- ]pepper|graying|greying)\b/i, 'gray'],
+  [/\b(platinum|snow|snowy|white)\b/i, 'white'],
+  [/\b(golden|blond|blonde|flaxen)\b/i, 'blonde'],
+  [/\b(ginger|copper)\b/i, 'orange'],
+  [/\b(brunette)\b/i, 'brown'],
+  [/\b(jet[- ]black|raven)\b/i, 'black'],
+]
+
+/** A hair-color id for an everyday word ("silver hair" is gray), or undefined. */
+export function hairColorWord(text: string): string | undefined {
+  const hits = [...new Set(HAIR_COLOR_WORDS.filter(([re]) => re.test(text)).map(([, id]) => id))]
+  return hits.length === 1 ? hits[0] : undefined
+}

@@ -428,3 +428,58 @@ describe('in the engine', () => {
     expect(o.render()).toEqual(a)
   })
 })
+
+describe('plain words map onto the catalog', () => {
+  const ASK = 'Silverhair, headphones, white graphic tee, bluejeans, white converse'
+  test('a literal reply (silver hair, blue jeans, converse all "unknown") is settled: gray hair, no jeans note, shoes said plainly', async () => {
+    const io = fake({ replies: [JSON.stringify({
+      outfit: 'tee', accessory: 'headphones',
+      unknown: [{ text: 'silver hair', slot: 'hairColor' }, { text: 'blue jeans', slot: 'outfit' }, { text: 'white converse sneakers', slot: 'outfit' }],
+    })] })
+    const o = await startBoss(ASK, io)
+    const f = o.flow as Flow
+    expect(f.stage).toBe('confirm')
+    expect(f.draft).toEqual({ hair: 'short', hairColor: 'gray', outfit: 'tee', accessory: 'headphones' })
+    const notes = f.notes.join('\n')
+    expect(notes).toContain("Shoes aren't part of the Boss's look yet.")
+    expect(notes).not.toContain('blue jeans')
+    expect(notes).not.toContain('silver')
+    expect(notes).not.toContain('Closest options')
+    expect(summaryLines(f)).toContain('hair color: Dark brown -> Gray')
+  })
+  test('a well-behaved reply: synonyms mapped by the model, missing parts listed once', async () => {
+    const io = fake({ replies: ['{"hairColor":"gray","outfit":"tee","accessory":"headphones","missing":[{"text":"white converse","kind":"shoes"},{"text":"converse","kind":"shoes"}]}'] })
+    const f = (await startBoss(ASK, io)).flow as Flow
+    expect(f.notes).toEqual(["Shoes aren't part of the Boss's look yet."])
+  })
+  test('an ask the model finds ambiguous becomes a step, not a guess', async () => {
+    const io = fake({ replies: ['{"outfit":"tee","vague":["hairColor"]}'] })
+    const f = (await startBoss('silvery-white hair and a tee', io)).flow as Flow
+    expect(f.stage).toBe('pick')
+    expect(f.slots).toEqual(['hairColor'])
+    expect(f.draft.outfit).toBe('tee')
+  })
+  test('ids stay strict: a made-up id still rejects the whole reply (R18)', async () => {
+    expect(interpret('{"hairColor":"silver"}')).toBeNull()
+    expect(interpret('{"missing":"shoes"}')).toBeNull()
+    expect(interpret('{"unknown":[{"text":"tattoos"}]}')?.missing).toEqual(['tattoos'])
+  })
+  test('Other with words for a missing part says so without closest options', async () => {
+    const io = fake({ replies: ['{"missing":[{"text":"red sneakers","kind":"shoes"}]}'] })
+    const start = (await startBoss('', io)).flow as Flow
+    const r = await actBoss({ ...start, i: 2 }, { kind: 'other', text: 'red sneakers' }, io)
+    expect(r.flow?.notes.join(' ')).toBe("Shoes aren't part of the Boss's look yet.")
+  })
+  test('the prompt gives ids with their names and the matching rules', async () => {
+    let system = ''
+    const io = { ...fake({ replies: ['{}'] }), complete: async (s: string) => { system = s; return '{}' } }
+    await startBoss(ASK, io)
+    const p = buildPrompt(ASK, DEFAULT_LOOK)
+    expect(p).toContain('tee (T-shirt and jeans)')
+    expect(p).toContain('gray')
+    expect(system).toContain('silver')
+    expect(system).toContain('missing')
+    expect(system).toContain('vague')
+    expect(system).toContain('not part of the look')
+  })
+})

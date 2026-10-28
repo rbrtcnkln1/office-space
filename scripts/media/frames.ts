@@ -317,6 +317,29 @@ const scenes: Record<string, () => Scene> = {
     s.run(10, 'Back to work, coffee in hand.')
     return s
   },
+
+  // e. Pizza party: /office-space-pizza. The Boss fetches pizza, everyone gathers, then back to work.
+  'pizza-party'() {
+    const s = new Scene('pizza-party', 21)
+    s.office.rnd = () => 0.999 // no random coffee runs: everyone is at their desk when the pizza comes
+    s.agents = [
+      job('a1', 'Write the login tests'), job('a2', 'Review the pull request'), job('a3', 'Research card routing'),
+      job('a4', 'Fix the flaky build'), job('a5', 'Draft the release notes'),
+    ]
+    s.sync()
+    s.run(6, 'A normal afternoon. Then: /office-space-pizza')
+    s.office.startParty()
+    s.run(3, 'The Boss heads out the door to get the pizza...')
+    s.until(() => s.office.boss.away, 120)
+    s.until(() => !s.office.boss.away, 60, '...and comes back with boxes.')
+    s.until(() => s.office.party?.phase === 'feast', 160, '...with pizza for the whole office.')
+    s.run(45, 'Pizza on the table! Everyone gets up, one by one...')
+    s.until(() => !s.office.boss.atParty, 400, '...and stands around with a slice. Nom.')
+    s.until(() => s.office.party === null, 300, 'Then back to work.')
+    s.until(() => [...s.office.workers.values()].every(w => w.seated), 300)
+    s.run(40, 'An empty box stays on the table all day.')
+    return s
+  },
 }
 
 mkdirSync(OUT, { recursive: true })

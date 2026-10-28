@@ -113,13 +113,14 @@ export type DayLog = {
   done: number
   failed: number
   needed: number
+  parties: number // pizza parties thrown today
   byRole: Record<string, number>
   failures: Array<{ who: string; task: string }>
   needs: Array<{ who: string; note: string }>
 }
 
 const LIST_CAP = 30
-export const emptyDay = (): DayLog => ({ done: 0, failed: 0, needed: 0, byRole: {}, failures: [], needs: [] })
+export const emptyDay = (): DayLog => ({ done: 0, failed: 0, needed: 0, parties: 0, byRole: {}, failures: [], needs: [] })
 
 const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0)
 
@@ -131,6 +132,7 @@ export function sanitizeDay(v: unknown): DayLog {
   out.done = count(o.done)
   out.failed = count(o.failed)
   out.needed = count(o.needed)
+  out.parties = count(o.parties)
   if (o.byRole && typeof o.byRole === 'object') {
     for (const [k, n] of Object.entries(o.byRole as Record<string, unknown>)) {
       if (Object.prototype.hasOwnProperty.call(ROLES, k) && count(n) > 0) out.byRole[k] = count(n)
@@ -263,6 +265,7 @@ export function recapText(log: DayLog, titleOf: (r: RoleId) => string | undefine
   } else {
     lines.push('  Outside workers that needed a person: none')
   }
+  if (log.parties) lines.push(`  Pizza parties: ${log.parties}`)
   const best = roles[0]
   lines.push(best ? `  Employee of the Day: ${name(best[0])} (${plural(best[1], 'hand-in', 'hand-ins')})` : '  Employee of the Day: nobody yet')
   lines.push('', 'Counts cover everything Office Space saw today in your sessions on this machine.')

@@ -240,3 +240,30 @@ export function floorSvg(f: FloorDef, W: number, H: number): string {
   cache.set(key, out)
   return out
 }
+
+// ---------- Pizza party (see Office.startParty in ./office.ts) ----------
+
+export const PIZZA_PAL: Palette = {
+  ...BASE,
+  a: '#d9a566', A: '#b9844a', r: '#d94141', h: '#f2c14e', e: '#b83a2e', t: '#c58a4f', c: '#8a5a30',
+}
+
+/** The open box on the table: stage 0 is a whole pie, 1 and 2 are slices going, 3 is empty (crumbs only). Padded and outlined. */
+export function pizzaOpenGrid(stage: number): Grid {
+  const s = Math.max(0, Math.min(3, Math.floor(stage)))
+  const g = grid(14, 5)
+  rows(g, 0, ['.AAAAAAAAAAAA.', 'aaaaaaaaaaaaaa', 'ahhehhhhehhhha', 'ahhhhehhhhehha', 'aaaaaaaaaaaaaa'])
+  const eaten = s === 0 ? 0 : s === 1 ? 4 : s === 2 ? 9 : 12
+  for (let x = 13 - eaten; x <= 12; x++) for (let y = 2; y <= 3; y++) D(g, x, y, 'a')
+  if (s === 3) { D(g, 3, 2, 'c'); D(g, 8, 3, 'c'); D(g, 11, 2, 'c') }
+  return outline(pad1(g))
+}
+
+/** Two closed boxes stacked, carried in from the door. Padded and outlined. */
+export function pizzaBoxesGrid(): Grid {
+  const one = ['aaaaaaaa', 'aarrraaa', 'AAAAAAAA']
+  const g = grid(8, 6)
+  rows(g, 0, one)
+  rows(g, 3, one)
+  return outline(pad1(g))
+}

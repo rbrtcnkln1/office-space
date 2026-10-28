@@ -73,7 +73,7 @@ Change how the office looks. Every command below works two ways: **say what you 
 
 ## Commands
 
-There are 13. Type `/office-space` and the menu lists them all (`/office-space-help` too).
+There are 14. Type `/office-space` and the menu lists them all (`/office-space-help` too).
 
 **Office**
 
@@ -81,6 +81,7 @@ There are 13. Type `/office-space` and the menu lists them all (`/office-space-h
 | --- | --- |
 | `/office-space` | Open or close the Office Space panel |
 | `/office-space-band` | Show or hide the small office strip above the prompt |
+| `/office-space-pizza` | Throw a pizza party (see [Pizza party](#pizza-party)). No AI, no plan usage |
 
 **Info**
 
@@ -123,6 +124,12 @@ Office roster - 2 at work
 
 Summaries are written by a small model from each worker's recent steps.
 ```
+
+### Pizza party
+
+`/office-space-pizza` throws a pizza party, about 40 seconds long, with no AI and no plan usage. If the office is closed it opens first so you can watch. The Boss walks out the door and comes back with boxes, the pizza lands on the meeting table, and every seated worker (in the session and in the remote annex) gets up one after another, walks over and stands around the table with a slice and a "nom" now and then. Then everyone goes back to their desk in the state they left it. Work carries on as usual: a worker that finishes mid-party still hands in and leaves, and a newcomer is briefed at the table. The status line says "pizza party!" while it is on, running it again just says it is already on, and `/office-space-recap` counts the day's parties. Afterwards an empty box stays on the table for the rest of the day.
+
+![The Boss fetches pizza, everyone gathers at the meeting table, then back to their desks](docs/media/pizza-party.gif)
 
 ### Usage in the office
 

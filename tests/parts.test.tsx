@@ -71,6 +71,7 @@ describe('clothing colors', () => {
     const b = new Office()
     b.bossLook = { ...DEFAULT_LOOK }
     b.partLib = new Map([['x-1', makePart('x', 'hat', COWBOY_HAT)]])
+    a.rnd = b.rnd = () => 0.999 // no random fidgets in either office
     for (let i = 0; i < 30; i++) { a.step(); b.step() }
     expect(hash(b.render(2))).toBe(hash(a.render(2)))
   })

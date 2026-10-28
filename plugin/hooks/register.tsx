@@ -10,6 +10,7 @@
 //   /office-space-feedback report a bug or share an idea
 //   /office-space-roster   who is at work and what each one is doing
 //   /office-space-recap    today's hand-ins, failures and calls for a person
+//   /office-space-pizza    throw a pizza party (no AI, free)
 //   /office-space-usage    context fill, plan limits and cost
 //   /office-space-workers  the outside-workers folder, what was read, what was skipped
 //   /office-space-boss     change how the Boss looks
@@ -310,6 +311,7 @@ async function loadEotd($: EngineInterface) {
 async function advance($: EngineInterface): Promise<void> {
   try {
     if (office.tick % POLL_EVERY === 0) await poll($)
+    office.leftover = tracker.log.parties > 0 // today's empty box on the table (the log is per day, so it clears itself)
     const moving = office.step()
     lastStep = Date.now()
     const typing = office.bossWorking || [...office.workers.values()].some(w => w.status === 'running')
@@ -343,6 +345,7 @@ async function catchUp($: EngineInterface) {
   const now = Date.now()
   if (lastStep && now - lastStep < 400) return
   const behind = lastStep ? Math.min(10, Math.floor((now - lastStep) / TICK_MS)) : 1
+  office.leftover = tracker.log.parties > 0
   for (let i = 0; i < behind; i++) office.step()
   if (office.tick % POLL_EVERY < behind || !lastStep) await poll($)
   lastStep = now
@@ -382,7 +385,7 @@ async function setOpen($: EngineInterface, on: boolean) {
 type Reply = { text: string }
 // A row decides what to do; the dispatcher below does it. Rows stay pure because
 // a module may not hand `$` to a function it looks up at run time.
-type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' | 'roster' | 'recap' | 'usage' | 'workers' } | { boss: string } | { office: string } | { team: string } | { theme: string }
+type Outcome = Reply | { toggle: 'panel' | 'band' } | { action: 'update' | 'feedback' | 'roster' | 'recap' | 'usage' | 'workers' | 'pizza' } | { boss: string } | { office: string } | { team: string } | { theme: string }
 type Command = {
   name: string
   description: string
@@ -497,6 +500,11 @@ export const COMMANDS: Command[] = [
     run: () => ({ action: 'recap' }),
   },
   {
+    name: 'office-space-pizza',
+    description: 'Throw a pizza party: the Boss fetches the pizza and everyone gathers at the meeting table (no plan usage)',
+    run: () => ({ action: 'pizza' }),
+  },
+  {
     name: 'office-space-usage',
     description: 'Context fill, plan limits with reset times, and cost',
     run: () => ({ action: 'usage' }),
@@ -600,6 +608,23 @@ async function rosterCommand($: EngineInterface): Promise<string> {
   const text = rosterText(rows, summaries, note)
   return total > rows.length ? `${text}
 ${total - rows.length} more not shown.` : text
+}
+
+/** Opens the office if it is closed, then starts the party. One short line back; a second run while one is on just says so. */
+async function pizzaCommand($: EngineInterface): Promise<string> {
+  let opened = false
+  if (!running) {
+    await setOpen($, true)
+    if (!(await paneShowing($))) await openPane($)
+    opened = true
+  }
+  if (!office.startParty()) return "The pizza party's already on."
+  try {
+    await dayEnsure($)
+    tracker.log.parties++
+    await $.store.set(tracker.key, tracker.log)
+  } catch {}
+  return opened ? 'Pizza party! Office Space is open and the Boss is off to get the pizza.' : 'Pizza party! The Boss is off to get the pizza.'
 }
 
 function recapCommand(): string {
@@ -1126,6 +1151,7 @@ async function runCommand($: EngineInterface, name: string, args: string): Promi
       const a = out.action
       if (a === 'roster') return { text: await rosterCommand($) }
       if (a === 'recap') return { text: recapCommand() }
+      if (a === 'pizza') return { text: await pizzaCommand($) }
       if (a === 'usage') return { text: await usageCommand($) }
       if (a === 'workers') return { text: await workersCommand($) }
       return { text: a === 'feedback' ? await feedback($) : await updateOffice(updateIo($)) }

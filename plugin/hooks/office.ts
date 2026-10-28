@@ -15,7 +15,7 @@ import { resolveParts } from './parts'
 import type { CustomPart, ResolvedParts } from './parts'
 import { DEFAULT_FLOOR, DEFAULT_WALL, SOUTH_H, floorOf, hasSouth, itemOf, pieceAt, slotOf, wallOf } from './decor'
 import type { Geometry, OfficeLook } from './decor'
-import { FRAMES, DECOR_PAL, floorSvg, itemGrid } from './decorart'
+import { FRAMES, DECOR_PAL, PIZZA_PAL, floorSvg, itemGrid, pizzaBoxesGrid, pizzaOpenGrid } from './decorart'
 import type { Team } from './team'
 import { sanitize } from './external'
 import type { RemoteInfo } from './external'
@@ -65,14 +65,20 @@ type Step =
   | { k: 'receive'; ticks: number }
   | { k: 'pause'; ticks: number }
   | { k: 'activity'; kind: Activity; ticks: number }
+  | { k: 'party'; off: number } // stand at the party until it ends (plus this many ticks)
   | { k: 'do'; fn: () => void }
 
-export type Activity = 'cooler' | 'trash' | 'gym' | 'chat' | 'station' | 'vending'
-export type Item = 'coffee' | 'tea' | 'water' | 'soda' | 'donut' | 'cookie'
+export type Activity = 'cooler' | 'trash' | 'gym' | 'chat' | 'station' | 'vending' | 'party'
+export type Item = 'coffee' | 'tea' | 'water' | 'soda' | 'donut' | 'cookie' | 'slice'
 const STATION_ITEMS: Item[] = ['coffee', 'coffee', 'tea', 'soda', 'donut', 'cookie']
 const VENDING_ITEMS: Item[] = ['soda', 'soda', 'donut', 'cookie'] // what the vending machine (a decor piece) gives out
 const BOSS_ERRAND_CHANCE = 1 / 700 // per tick while the Boss is free
 const SIP_TICKS = 70
+const FEAST_TICKS = 120 // how long everyone stands around the pizza (12 s)
+const GATHER_TICKS = 90 // plus the time the guests need to walk over
+// Where guests stand around the meeting table, relative to its left edge (x) and the sprite top (y): beside it, behind it, then a little further out. The Boss takes the back-centre spot.
+const PARTY_SPOTS: Array<[number, number]> = [[-15, 30], [27, 30], [-31, 24], [-17, 40], [29, 40], [-34, 36]]
+const PARTY_BOSS_SPOT: [number, number] = [4, 22]
 const LOUNGE_AFTER = 30 // ticks of nothing to do before the Boss kicks back
 const IDLE_WORDS = [
   'whistling', 'daydreaming', 'whimsically', 'wishing on a stapler', 'sleeping with eyes open',
@@ -83,6 +89,7 @@ const IDLE_WORDS = [
 const NOTE_ROWS = ['..nn', '..nn', '..n.', '..n.', 'nnn.', 'nnn.']
 
 const ITEM_ROWS: Record<Item, string[]> = {
+  slice: ['tttttt..', 'hehhhe..', '.hhhh...', '..hh....', '...h....'],
   coffee: ['.cccc...', 'wwwwww..', 'wwwww.w.', 'wwwww.w.', 'wwwwww..', '.wwww...'],
   tea: ['..g.....', '.wgww...', 'wwwwww..', 'wwwww.w.', 'wwwwww..', '.wwww...'],
   water: ['b....b..', 'bBBBBb..', 'bBBBBb..', '.bBBb...', '.bbbb...'],
@@ -90,6 +97,8 @@ const ITEM_ROWS: Record<Item, string[]> = {
   donut: ['.pppp...', 'pp..pp..', 'tt..tt..', '.tttt...'],
   cookie: ['.tttt...', 'tytytt..', 'ttttyt..', '.tttt...'],
 }
+
+type Party = { id: number; phase: 'fetch' | 'feast'; startedAt: number; endsAt: number; invited: number; nextInvite: number }
 
 type Actor = { pos: Pt; facing: Dir; seated: boolean; plan: Step[]; walkFrame: number; reaching: boolean; carrying: boolean }
 
@@ -109,12 +118,14 @@ type Worker = Actor & {
   activity: Activity | null
   item: Item | null // a drink or snack in hand
   sipUntil: number
+  partyId: number // the party this worker was last invited to (0 = none)
   remote?: RemoteInfo // an external worker (see ./external.ts)
 }
 
 type Boss = Actor & {
   react: 'ack' | 'err' | null; reactUntil: number; ambientUntil: number; missions: string[]
   errand: boolean; atStation: boolean; item: Item | null; sipUntil: number; idleTicks: number
+  away: boolean; boxes: boolean; atParty: boolean // out the door for pizza / carrying the boxes / eating at the table
 }
 
 type Packet = { from: Pt; to: Pt; t: number; dur: number; err: boolean }
@@ -282,7 +293,7 @@ export class Office {
 
   constructor() {
     const seat = this.bossSeat()
-    this.boss = { pos: seat, facing: 'down', seated: true, plan: [], walkFrame: 0, reaching: false, carrying: false, react: null, reactUntil: 0, ambientUntil: 0, missions: [], errand: false, atStation: false, item: null, sipUntil: 0, idleTicks: 0 }
+    this.boss = { pos: seat, facing: 'down', seated: true, plan: [], walkFrame: 0, reaching: false, carrying: false, react: null, reactUntil: 0, ambientUntil: 0, missions: [], errand: false, atStation: false, item: null, sipUntil: 0, idleTicks: 0, away: false, boxes: false, atParty: false }
   }
 
   /** What a role is called on the floor: the team's title, or the built-in one. */
@@ -343,6 +354,13 @@ export class Office {
   }
   tableX() { return Math.round((this.bossRight() + this.width - 100) / 2) - 14 }
   stationX() { return this.tableX() + 36 } // coffee station: machine, snacks, mini fridge
+  /** Where chance comes from (tests and scenes can fix it). */
+  rnd: () => number = () => Math.random()
+  /** The pizza party in progress, or none. */
+  party: Party | null = null
+  private partySeq = 0
+  /** An empty pizza box stays on the meeting table once a party has happened today (set by the caller from the day's log). */
+  leftover = false
   eotd = new Map<RoleId, number>() // hand-ins per role today
   eotdDirty = false
   spot(i: number): Pt {
@@ -399,7 +417,7 @@ export class Office {
         w = {
           id: a.id, name: sanitize(a.name || ''), label, role: roleFor(`${label} ${a.type}`, seed), status: a.status, state: 'idle', desk: -1, seed,
           pos: this.door(), facing: 'right', seated: false, plan: [], walkFrame: 0, reaching: false, carrying: false,
-          ambientUntil: 0, seatedOnce: false, ending: false, hidden: false, activity: null, item: null, sipUntil: 0,
+          ambientUntil: 0, seatedOnce: false, ending: false, hidden: false, activity: null, item: null, sipUntil: 0, partyId: 0,
           ...(a.remote ? { remote: a.remote } : {}),
         }
         this.workers.set(a.id, w)
@@ -607,7 +625,7 @@ export class Office {
     const spot = this.areaSpot(kind, side)
     const aisle = this.aisleY()
     const dur = ticks || (kind === 'gym' ? 50 : kind === 'trash' ? 20 : kind === 'chat' ? 60 : kind === 'station' ? 24 : kind === 'vending' ? 26 : 40)
-    const item: Item | null = kind === 'cooler' ? 'water' : kind === 'station' ? (STATION_ITEMS[Math.floor(Math.random() * STATION_ITEMS.length)] as Item) : kind === 'vending' ? (VENDING_ITEMS[Math.floor(Math.random() * VENDING_ITEMS.length)] as Item) : null
+    const item: Item | null = kind === 'cooler' ? 'water' : kind === 'station' ? (STATION_ITEMS[Math.floor(this.rnd() * STATION_ITEMS.length)] as Item) : kind === 'vending' ? (VENDING_ITEMS[Math.floor(this.rnd() * VENDING_ITEMS.length)] as Item) : null
     w.seated = false
     w.plan = [
       { k: 'walk', path: [...this.fromDesk(slot), { x: spot.x, y: aisle }, spot], speed: SPEED },
@@ -615,6 +633,68 @@ export class Office {
       { k: 'activity', kind, ticks: dur },
       { k: 'do', fn: () => { if (item) w.item = item } },
       { k: 'do', fn: () => { w.plan.unshift({ k: 'walk', path: this.toDesk(w.pos.x, w.desk), speed: SPEED }) } },
+      { k: 'do', fn: () => this.sitDown(w) },
+    ]
+  }
+
+  // ----- the pizza party -----
+  private laneX() { return this.tableX() - 17 } // the way up to the table, left of it, clear of every desk row
+  private guestSpot(i: number): Pt {
+    const [dx, dy] = PARTY_SPOTS[i % PARTY_SPOTS.length] as [number, number]
+    const ring = Math.floor(i / PARTY_SPOTS.length) // extras stand a little further out
+    return { x: this.tableX() + dx - (dx < 0 ? ring * 5 : -ring * 5), y: dy }
+  }
+
+  /** Throws a pizza party: the Boss fetches the pizza from the door, everyone gathers at the meeting table, then all go back to their desks. False when one is already on. */
+  startParty(): boolean {
+    if (this.party) return false
+    const b = this.boss
+    const p: Party = { id: ++this.partySeq, phase: 'fetch', startedAt: this.tick, endsAt: 0, invited: 0, nextInvite: 0 }
+    this.party = p
+    const door = this.door()
+    const aisle = this.aisleY()
+    const lane = this.laneX()
+    const seat = this.bossSeat()
+    const side = { x: this.bossRight() + 2, y: seat.y }
+    const sp = { x: this.tableX() + PARTY_BOSS_SPOT[0], y: PARTY_BOSS_SPOT[1] }
+    const speed = SPEED + 2
+    b.plan.push(
+      { k: 'do', fn: () => { b.seated = false; b.errand = true } },
+      { k: 'walk', path: [side, { x: side.x, y: aisle }, { x: door.x, y: aisle }, { ...door }], speed },
+      { k: 'do', fn: () => { b.away = true; b.facing = 'down' } },
+      { k: 'pause', ticks: 16 },
+      { k: 'do', fn: () => { b.away = false; b.boxes = true } },
+      { k: 'walk', path: [{ x: door.x, y: aisle }, { x: lane, y: aisle }, { x: lane, y: 30 }, { x: sp.x, y: 30 }, { ...sp }], speed },
+      { k: 'do', fn: () => { b.boxes = false; b.item = 'slice'; b.atParty = true; b.facing = 'down'; p.phase = 'feast'; p.startedAt = this.tick; p.endsAt = this.tick + GATHER_TICKS + FEAST_TICKS } },
+      { k: 'party', off: 0 },
+      { k: 'do', fn: () => { b.atParty = false } },
+      { k: 'walk', path: [{ x: sp.x, y: 30 }, { x: lane, y: 30 }, { x: lane, y: aisle }, { x: side.x, y: aisle }, side, seat], speed },
+      { k: 'do', fn: () => {
+        b.seated = true
+        b.errand = false
+        b.facing = 'down'
+        b.sipUntil = this.tick + SIP_TICKS
+        if (b.carrying) { b.carrying = false; this.react('ack') }
+        this.party = null
+        this.leftover = true
+      } },
+    )
+    return true
+  }
+
+  /** A seated worker gets up for the pizza, eats it standing at the table, then goes back and sits down again. */
+  private joinParty(w: Worker, p: Party) {
+    const i = p.invited++
+    const sp = this.guestSpot(i)
+    const lane = this.laneX()
+    const aisle = this.aisleY()
+    w.partyId = p.id
+    w.seated = false
+    w.plan = [
+      { k: 'walk', path: [...this.fromDesk(w.desk), { x: lane, y: aisle }, { x: lane, y: 30 }, { x: sp.x, y: 30 }, sp], speed: SPEED },
+      { k: 'do', fn: () => { w.facing = sp.x < this.tableX() - 2 ? 'right' : sp.x > this.tableX() + 10 ? 'left' : 'down'; w.item = 'slice' } },
+      { k: 'party', off: Math.min(24, i * 2) },
+      { k: 'do', fn: () => { w.plan.unshift({ k: 'walk', path: [{ x: sp.x, y: 30 }, { x: lane, y: 30 }, ...this.toDesk(lane, w.desk)], speed: SPEED }) } },
       { k: 'do', fn: () => this.sitDown(w) },
     ]
   }
@@ -672,15 +752,15 @@ export class Office {
     for (const w of [...this.workers.values()]) if (this.run(w, true)) moving = true
     for (const p of this.packets) p.t += 1
     this.packets = this.packets.filter(p => p.t <= p.dur)
-    if (Math.random() < AMBIENT_CHANCE) {
+    if (this.rnd() < AMBIENT_CHANCE) {
       const seated = [...this.workers.values()].filter(w => w.seated)
-      const pick = seated[Math.floor(Math.random() * seated.length)]
+      const pick = seated[Math.floor(this.rnd() * seated.length)]
       if (pick) pick.ambientUntil = this.tick + 14
     }
-    if (Math.random() < AMBIENT_CHANCE / 2 && b.seated) b.ambientUntil = this.tick + 14
+    if (this.rnd() < AMBIENT_CHANCE / 2 && b.seated) b.ambientUntil = this.tick + 14
     // the Boss's drink runs
-    if (b.seated && !b.plan.length && !b.missions.length && !this.queue.length && b.sipUntil < this.tick && Math.random() < BOSS_ERRAND_CHANCE) {
-      const pick = (['coffee', 'coffee', 'water', 'tea', 'soda', 'donut'] as const)[Math.floor(Math.random() * 6)] as Item
+    if (b.seated && !b.plan.length && !b.missions.length && !this.queue.length && b.sipUntil < this.tick && this.rnd() < BOSS_ERRAND_CHANCE) {
+      const pick = (['coffee', 'coffee', 'water', 'tea', 'soda', 'donut'] as const)[Math.floor(this.rnd() * 6)] as Item
       this.bossErrand(pick)
     }
     if (b.item && b.seated && b.sipUntil < this.tick) b.item = null
@@ -688,19 +768,25 @@ export class Office {
     b.idleTicks = free ? b.idleTicks + 1 : 0
     if (this.lounging() && this.tick % 3 === 0) moving = true // keep the notes floating
     for (const w of this.workers.values()) if (w.item && w.seated && w.sipUntil < this.tick) w.item = null
+    // the pizza is here: invite seated workers one by one (also anyone who sat down or came back mid-party)
+    const pz = this.party
+    if (pz && pz.phase === 'feast' && this.tick >= pz.nextInvite && this.tick < pz.endsAt - 10) {
+      const guest = [...this.workers.values()].find(w => w.seated && !w.plan.length && !w.ending && w.desk >= 0 && w.partyId !== pz.id)
+      if (guest) { this.joinParty(guest, pz); pz.nextInvite = this.tick + 2 }
+    }
     // breaks: seated workers wander to the break area now and then
     for (const w of this.workers.values()) {
       if (!w.seated || w.plan.length || w.ending || w.desk < 0) continue
       const chance = w.status === 'running' ? BREAK_CHANCE_BUSY : BREAK_CHANCE_IDLE
-      if (Math.random() < chance) {
+      if (this.rnd() < chance) {
         // a vending machine in the room is one more place to go (only then does the pick change)
         const kinds: Activity[] = this.hasVending() ? ['cooler', 'trash', 'gym', 'station', 'station', 'vending'] : ['cooler', 'trash', 'gym', 'station', 'station']
-        this.takeBreak(w, kinds[Math.floor(Math.random() * kinds.length)] as Activity)
+        this.takeBreak(w, kinds[Math.floor(this.rnd() * kinds.length)] as Activity)
       }
     }
     // the door opens for anyone in the doorway
     const d = this.door()
-    const near = [...this.workers.values()].some(w => w.hidden || (Math.abs(w.pos.x - d.x) < 10 && w.pos.y < this.aisleY() - 4))
+    const near = [...this.workers.values()].some(w => w.hidden || (Math.abs(w.pos.x - d.x) < 10 && w.pos.y < this.aisleY() - 4)) || this.boss.away || (!!this.party && !this.boss.seated && Math.abs(this.boss.pos.x - d.x) < 10 && this.boss.pos.y < this.aisleY() - 4)
     const target = near ? 3 : 0
     if (this.doorOpen !== target) { this.doorOpen += Math.sign(target - this.doorOpen); moving = true }
     if (!moving) this.layout()
@@ -758,6 +844,14 @@ export class Office {
         const meet = { x: Math.min(this.width - 20, b.pos.x + 16), y: b.pos.y }
         a.plan.unshift({ k: 'walk', path: [{ x: w.pos.x, y: this.aisleY() }, { x: meet.x, y: this.aisleY() }, meet], speed: SPEED }, { k: 'do', fn: () => { w.facing = 'left' } })
         return true
+      } else if (idx === 0 && (w.state === 'walking-to-boss' || w.state === 'arriving') && b.atParty) {
+        // the Boss is eating at the meeting table: go to him there
+        a.plan.shift()
+        w.state = w.state === 'arriving' ? 'briefed' : 'handoff'
+        const meet = { x: b.pos.x + 16, y: 30 }
+        const lane = this.laneX()
+        a.plan.unshift({ k: 'walk', path: [{ x: w.pos.x, y: this.aisleY() }, { x: lane, y: this.aisleY() }, { x: lane, y: 30 }, meet], speed: SPEED }, { k: 'do', fn: () => { w.facing = 'left' } })
+        return true
       } else if (w.state === 'arriving' || w.state === 'walking-to-boss') {
         // waiting in line keeps the same state; nothing moves
       }
@@ -771,10 +865,16 @@ export class Office {
       if (--s.ticks <= 0) { a.plan.shift(); w.activity = null; w.reaching = false }
       return true
     }
+    if (s.k === 'party') {
+      const w = isWorker ? (a as Worker) : null
+      if (w) w.activity = 'party'
+      if (!this.party || this.tick >= this.party.endsAt + s.off || (w && w.ending)) { a.plan.shift(); if (w) w.activity = null }
+      return true
+    }
     if (s.k === 'receive' && isWorker) {
       if (!a.reaching) {
         a.reaching = true
-        const bs = this.bossSeat()
+        const bs = this.boss.seated ? this.bossSeat() : this.boss.pos
         this.packets.push({ from: { x: bs.x + 6, y: bs.y + 10 }, to: { x: a.pos.x + 8, y: a.pos.y + 8 }, t: 0, dur: s.ticks, err: false })
       }
       if (--s.ticks <= 0) { a.plan.shift(); a.reaching = false }
@@ -816,7 +916,7 @@ export class Office {
     if (this.usage) out.push(usageWall(this.usage, this.bossX() + 71, WALL_TOP, this.clockNow || Date.now()))
     // title
     out.push(`<text x="4" y="8" font-family="ui-monospace,Menlo,monospace" font-size="6" font-weight="700" fill="#c0392b">◆ OFFICE SPACE</text>`)
-    out.push(`<text x="60" y="8" font-family="ui-monospace,Menlo,monospace" font-size="5" fill="#2b3550">${esc(this.summary())}</text>`)
+    out.push(`<text x="60" y="8" font-family="ui-monospace,Menlo,monospace" font-size="5" fill="#2b3550">${esc(this.summary().replace('🍕 ', ''))}</text>`) // the drawing's font has no pizza emoji
 
     const drawables: Array<{ z: number; svg: string }> = []
     const add = (z: number, svg: string) => drawables.push({ z, svg })
@@ -852,8 +952,10 @@ export class Office {
       } else {
         add(by + 16, this.charSvg('boss', 'down', 'seat', frame, typing, (f + 7) % 47 < 2, nod, this.bossSeat()))
       }
-    } else {
-      add(b.pos.y + 20.5, this.charSvg('boss', b.facing, b.reaching ? 'reach' : 'walk', b.walkFrame, false, false, false, b.pos))
+    } else if (!b.away) {
+      add(b.pos.y + 20.5, this.charSvg('boss', b.facing, b.reaching ? 'reach' : b.atParty ? 'stand' : 'walk', b.walkFrame, false, false, false, b.pos))
+      if (b.boxes) add(b.pos.y + 20.6, place(b.pos.x + (b.facing === 'left' ? -1 : 8), b.pos.y + 6, gridSvg('pz-boxes', pizzaBoxesGrid(), PIZZA_PAL)))
+      if (b.atParty && (f + 3) % 34 < 8) add(999, this.nomBubble(b.pos.x + 10, b.pos.y - 7))
     }
     const bAt = b.seated ? this.bossSeat() : b.pos
     if (b.reactUntil > f && b.react) {
@@ -863,7 +965,7 @@ export class Office {
     } else if (b.ambientUntil > f && b.seated && !b.item) {
       add(999, place(bAt.x + 13, bAt.y - 9, gridSvg('amb-mug', icon('mug'), FURN_PAL)))
     }
-    if (b.item) add(b.seated ? by + 17 : b.pos.y + 20.7, this.itemSvg(b.item, bAt, b.seated, f))
+    if (b.item && !b.away) add(b.seated ? by + 17 : b.pos.y + 20.7, this.itemSvg(b.item, bAt, b.seated || b.atParty, f))
 
     // desks
     if (this.annex.length) {
@@ -934,7 +1036,8 @@ export class Office {
       const pose = w.reaching ? 'reach' : w.activity || w.plan[0]?.k === 'queue' ? 'stand' : 'walk'
       add(w.pos.y + 20.5, this.charSvg(w.role, w.facing, pose, w.walkFrame, false, false, false, w.pos))
       if ((w.activity === 'cooler' || w.activity === 'station' || w.activity === 'vending') && Math.floor(f / 10) % 2) add(999, place(w.pos.x + 12, w.pos.y - 7, gridSvg('dots', BUBBLE_DOTS, FURN_PAL)))
-      if (w.item) add(w.pos.y + 20.7, this.itemSvg(w.item, w.pos, false, f))
+      if (w.item) add(w.pos.y + 20.7, this.itemSvg(w.item, w.pos, w.activity === 'party', f + w.seed))
+      if (w.activity === 'party' && (f + w.seed) % 34 < 8) add(999, this.nomBubble(w.pos.x + 10, w.pos.y - 7))
       if (w.activity === 'chat' && Math.floor((f + w.seed) / 7) % 2) add(999, place(w.pos.x + 10, w.pos.y - 7, gridSvg('dots', BUBBLE_DOTS, FURN_PAL)))
       if (w.carrying && !w.reaching) {
         const err = w.status === 'failed'
@@ -994,12 +1097,16 @@ export class Office {
     return o.join('')
   }
 
+  private nomBubble(x: number, y: number): string {
+    return place(x, y, `<rect width="13" height="7" fill="#f4f1e8"/><rect x="0.3" y="0.3" width="12.4" height="6.4" fill="none" stroke="#22304a" stroke-width="0.6"/><text x="6.5" y="5" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="4.4" font-weight="700" fill="#22304a">nom</text>`)
+  }
+
   /** A drink or snack: in hand while walking, raised to sip while seated. */
   private itemSvg(item: Item, at: Pt, seated: boolean, f: number): string {
     const rows = ITEM_ROWS[item]
     const gr = grid(8, rows.length)
     rows.forEach((r, y) => [...r].forEach((ch, x) => { if (ch !== '.') (gr[y] as string[])[x] = ch }))
-    const pal = { ...FURN_PAL, c: '#5b3a1f', w: '#ffffff', g: '#4f8a4b', b: '#7ec8e3', B: '#cfe9f2', r: '#d94141', W: '#f4f1e8', X: '#9aa3b5', p: '#f29fc4', t: '#c58a4f', y: '#5b3a1f' }
+    const pal = { ...FURN_PAL, c: '#5b3a1f', w: '#ffffff', g: '#4f8a4b', b: '#7ec8e3', B: '#cfe9f2', r: '#d94141', W: '#f4f1e8', X: '#9aa3b5', p: '#f29fc4', t: '#c58a4f', y: '#5b3a1f', h: '#f2c14e', e: '#b83a2e' }
     const svg = gridSvg(`item-${item}`, outline(pad1(gr)), pal)
     if (!seated) return place(at.x + 11, at.y + 10, svg)
     const sip = Math.floor(f / 12) % 3 === 0 // lift to the mouth now and then
@@ -1022,6 +1129,10 @@ export class Office {
     // meeting table + stools
     const t = this.tableX()
     d.push({ z: 52, svg: place(t, 44, g('table', ['dddddddddddddddddddddddd', 'DDDDDDDDDDDDDDDDDDDDDDDD', '.q....................q.', '.q....................q.', '.q....................q.'])) })
+    // the pizza: an open box while the party is on, an empty one left behind for the rest of the day
+    const pz = this.party
+    const stage = pz && pz.phase === 'feast' ? Math.min(3, Math.floor(((this.tick - pz.startedAt) / (pz.endsAt - pz.startedAt)) * 3.5)) : this.leftover ? 3 : -1
+    if (stage >= 0) d.push({ z: 52.5, svg: place(t + 5, 38, gridSvg(`pz-open-${stage}`, pizzaOpenGrid(stage), PIZZA_PAL)) })
     // coffee station: machine, snack basket, mini fridge
     d.push({ z: 47, svg: place(this.stationX(), 30, g('station', ['TTTT...YYY....KK', 'TRTT..YuYuY...KK', 'TTTT..uuuuu...KK', 'T..T.w.uuu....KK', 'dddddddddddddddd', 'DDDDDDDDDDDDDDDD', 'qqqqqqqqqqqqqqqq', 'qqqqqqqqqqqqqqqq', 'qqqqqqqqqqqqqqqq', 'q..............q'])) })
     // gym mat
@@ -1081,13 +1192,16 @@ export class Office {
     const leaving = ws.filter(w => w.ending).length
     const needed = ws.filter(w => w.remote?.need && !w.remote.stale && !w.ending).length
     const b = this.boss
-    const bossNote = b.errand ? (b.item ? `boss is bringing back a ${b.item}` : 'boss is on a drink run')
+    const pz = this.party
+    const bossNote = pz ? (pz.phase === 'fetch' ? 'boss is fetching the pizza' : 'boss is having a slice')
+      : b.errand ? (b.item ? `boss is bringing back a ${b.item}` : 'boss is on a drink run')
       : !b.seated ? 'boss is walking a message over'
       : b.item ? `boss is enjoying a ${b.item}`
       : this.lounging() ? `boss is idly ${this.idleWord()}`
       : this.bossWorking ? 'boss is busy' : 'boss is idle'
-    if (!ws.length) return `no one at work · ${bossNote}`
-    return [needed ? `${needed} need${needed === 1 ? 's' : ''} you` : '', working ? `${working} working` : '', coming ? `${coming} arriving` : '', leaving ? `${leaving} handing in` : '', bossNote].filter(Boolean).join(' · ')
+    const lead = pz ? '🍕 pizza party!' : ''
+    if (!ws.length) return [lead, 'no one at work', bossNote].filter(Boolean).join(' · ')
+    return [lead, needed ? `${needed} need${needed === 1 ? 's' : ''} you` : '', working ? `${working} working` : '', coming ? `${coming} arriving` : '', leaving ? `${leaving} handing in` : '', bossNote].filter(Boolean).join(' · ')
   }
 
   textLines(): Array<{ dot: string; title: string; label: string }> {

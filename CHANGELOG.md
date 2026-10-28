@@ -2,6 +2,13 @@
 
 Every release bumps `version` in `plugin/.claude-plugin/plugin.json`; that bump is what installed copies update to.
 
+## 0.14.0 — 2026-10-28
+A pizza party.
+- New `/office-space-pizza`: throws a pizza party (no AI, no plan usage). The Boss walks out the door and comes back with boxes, the pizza lands on the meeting table, and every seated worker gets up one after another, stands around the table with a slice and a "nom" now and then, then goes back to the same desk and state. Workers keep updating while it runs: one that finishes mid-party still hands in and leaves, and a newcomer is briefed at the table. Opens the office if it is closed; running it during a party just says it is already on. Guests stand beside, behind and in front of the table, never on desks, aisles or the door.
+- An empty pizza box stays on the meeting table for the rest of the day after a party (remembered with the day's log, so it survives reloads and clears on the next day). A day with no party draws exactly as before.
+- `/office-space-recap` counts the day's pizza parties.
+- Tests can now fix the office's chance (`Office.rnd`), so the random-fidget tests are no longer flaky.
+
 ## 0.13.0 — 2026-10-11
 Clothing colors, AI-drawn parts, and panel buttons that work in the desktop app.
 - Clothing colors: a top color and a bottom color for any outfit, from 15 named colors (white, black, gray, red, orange, yellow, green, teal, blue, navy, purple, pink, brown, tan, denim). Say it in words (`/office-space-boss a white tee and blue jeans`) or pick them as steps after the outfit in `/office-space-boss` and `/office-space-team` (no trouser step for a suit, which is one piece). Unset colors keep the outfit's own, so every existing look draws exactly as before. Saved looks and theme files carry the new optional `top` and `bottom` fields; older theme files still load.
